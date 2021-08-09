@@ -1777,11 +1777,17 @@ impl JsonRpcRequestProcessor {
                 &IndexKey::VelasAccountStorage(storage_key),
                 is_target_velas_account,
             )
-        } else {
+        } else if self
+            .config
+            .account_indexes
+            .contains(&AccountIndex::ProgramId)
+        {
             bank.get_filtered_program_accounts(
                 &velas_account_program::id(),
                 is_target_velas_account,
             )
+        } else {
+            vec![]
         }
     }
 
@@ -1809,11 +1815,17 @@ impl JsonRpcRequestProcessor {
                 &IndexKey::VelasAccountOwner(owner_key),
                 is_target_velas_account_storage,
             )
-        } else {
+        } else if self
+            .config
+            .account_indexes
+            .contains(&AccountIndex::ProgramId)
+        {
             bank.get_filtered_program_accounts(
                 &velas_account_program::id(),
                 is_target_velas_account_storage,
             )
+        } else {
+            vec![]
         }
     }
 
@@ -1839,11 +1851,17 @@ impl JsonRpcRequestProcessor {
                 &IndexKey::VelasRelyingOwner(owner_key),
                 is_target_velas_account_storage,
             )
-        } else {
+        } else if self
+            .config
+            .account_indexes
+            .contains(&AccountIndex::ProgramId)
+        {
             bank.get_filtered_program_accounts(
                 &velas_relying_party_program::id(),
                 is_target_velas_account_storage,
             )
+        } else {
+            vec![]
         }
     }
 
@@ -1872,11 +1890,17 @@ impl JsonRpcRequestProcessor {
                 &IndexKey::VelasAccountOperational(operational_key),
                 is_target_velas_account_storage,
             )
-        } else {
+        } else if self
+            .config
+            .account_indexes
+            .contains(&AccountIndex::ProgramId)
+        {
             bank.get_filtered_program_accounts(
                 &velas_account_program::id(),
                 is_target_velas_account_storage,
             )
+        } else {
+            vec![]
         }
     }
 }
