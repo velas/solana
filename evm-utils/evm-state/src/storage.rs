@@ -8,13 +8,14 @@ use std::{
 };
 
 use bincode::config::{BigEndian, DefaultOptions, Options as _, WithOtherEndian};
+use derive_more::{AsRef, Deref};
 use lazy_static::lazy_static;
 use log::*;
 use rlp::{Decodable, Encodable};
 use rocksdb::{
     self,
     backup::{BackupEngine, BackupEngineOptions, RestoreOptions},
-    ColumnFamily, ColumnFamilyDescriptor, Options, DB,
+    ColumnFamily, ColumnFamilyDescriptor, Options,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use tempfile::TempDir;
@@ -26,6 +27,7 @@ use crate::{
 use triedb::{empty_trie_hash, rocksdb::RocksMemoryTrieMut, FixedSecureTrieMut};
 
 pub type Result<T> = std::result::Result<T, Error>;
+pub use rocksdb::DB;
 
 type BincodeOpts = WithOtherEndian<DefaultOptions, BigEndian>;
 lazy_static! {
@@ -165,44 +167,33 @@ impl Storage {
     ) -> FixedSecureTrieMut<RocksMemoryTrieMut<&DB>, K, V> {
         FixedSecureTrieMut::new(RocksMemoryTrieMut::new(self.db.as_ref(), root))
     }
+
+    pub fn db(&self) -> &DB {
+        (*self.db).borrow()
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, AsRef, Deref)]
 // Hack to close rocksdb background threads. And flush database.
 pub struct DbWithClose(DB);
 
 impl Drop for DbWithClose {
     fn drop(&mut self) {
-        if let Err(e) = self.0.flush() {
+        if let Err(e) = self.flush() {
             error!("Error during rocksdb flush: {:?}", e);
         }
-        self.0.cancel_all_background_work(true);
+        self.cancel_all_background_work(true);
     }
 }
 
 impl PartialEq for DbWithClose {
     fn eq(&self, other: &DbWithClose) -> bool {
-        self.0.path() == other.0.path()
+        self.path() == other.path()
     }
 }
 
-impl Eq for DbWithClose {}
-
-impl AsRef<DB> for DbWithClose {
-    fn as_ref(&self) -> &DB {
-        &self.0
-    }
-}
-
-impl<'a> Borrow<DB> for &'a DbWithClose {
+impl Borrow<DB> for &DbWithClose {
     fn borrow(&self) -> &DB {
-        &self.0
-    }
-}
-
-impl std::ops::Deref for DbWithClose {
-    type Target = DB;
-    fn deref(&self) -> &DB {
         &self.0
     }
 }
