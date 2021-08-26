@@ -21,7 +21,7 @@ pub use {
         AccountProvider, Committed, EvmBackend, EvmPersistState, EvmState, Incomming,
         DEFAULT_GAS_LIMIT, MAX_IN_MEMORY_EVM_ACCOUNTS,
     },
-    storage::Storage,
+    storage::{Storage, DB},
 };
 
 pub use executor::{
