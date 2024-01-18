@@ -1,7 +1,7 @@
-use evm_state::Block;
-use solana_transaction_status::ConfirmedBlockWithOptionalMetadata;
-
-use crate::routines::repeat::BlockMessage;
+use {
+    crate::routines::repeat::BlockMessage, evm_state::Block,
+    solana_transaction_status::ConfirmedBlock,
+};
 
 pub type RoutineResult = std::result::Result<(), AppError>;
 
@@ -107,10 +107,7 @@ pub enum AppError {
     SendAsyncEVM(#[source] tokio::sync::mpsc::error::SendError<BlockMessage<Block>>),
 
     #[error("Unable to send Native message through a tokio channel")]
-    SendAsyncNative(
-        #[source]
-        tokio::sync::mpsc::error::SendError<BlockMessage<ConfirmedBlockWithOptionalMetadata>>,
-    ),
+    SendAsyncNative(#[source] tokio::sync::mpsc::error::SendError<BlockMessage<ConfirmedBlock>>),
 
     #[error("Unable to join async tasks")]
     TokioTaskJoin(#[source] tokio::task::JoinError),
