@@ -98,7 +98,7 @@ use {
         timing::timestamp,
     },
     solana_send_transaction_service::send_transaction_service,
-    solana_streamer::socket::SocketAddrSpace,
+    solana_streamer::{socket::SocketAddrSpace, streamer::StakedNodes},
     solana_vote_program::vote_state::VoteState,
     std::{
         collections::{HashMap, HashSet},
@@ -177,7 +177,6 @@ pub struct ValidatorConfig {
     pub accounts_shrink_ratio: AccountShrinkThreshold,
     pub wait_to_vote_slot: Option<Slot>,
     pub ledger_column_options: LedgerColumnOptions,
-    pub enable_quic_servers: bool,
     pub verify_evm_state: bool,
     pub jaeger_collector_url: Option<String>,
 }
@@ -247,7 +246,6 @@ impl Default for ValidatorConfig {
             jaeger_collector_url: None,
             wait_to_vote_slot: None,
             ledger_column_options: LedgerColumnOptions::default(),
-            enable_quic_servers: true,
         }
     }
 }
@@ -397,6 +395,7 @@ impl Validator {
         socket_addr_space: SocketAddrSpace,
         use_quic: bool,
         tpu_connection_pool_size: usize,
+        tpu_enable_udp: bool,
     ) -> Self {
         let id = identity_keypair.pubkey();
         assert_eq!(id, node.info.id);
@@ -700,12 +699,15 @@ impl Validator {
         );
         let poh_recorder = Arc::new(Mutex::new(poh_recorder));
 
+        let staked_nodes = Arc::new(RwLock::new(StakedNodes::default()));
+
         let connection_cache = match use_quic {
             true => {
                 let mut connection_cache = ConnectionCache::new(tpu_connection_pool_size);
                 connection_cache
                     .update_client_certificate(&identity_keypair, node.info.gossip.ip())
                     .expect("Failed to update QUIC client certificates");
+                connection_cache.set_staked_nodes(&staked_nodes, &identity_keypair.pubkey());
                 Arc::new(connection_cache)
             }
             false => Arc::new(ConnectionCache::with_udp(tpu_connection_pool_size)),
@@ -1072,7 +1074,8 @@ impl Validator {
             &cost_model,
             &connection_cache,
             &identity_keypair,
-            config.enable_quic_servers,
+            &staked_nodes,
+            tpu_enable_udp,
         );
 
         datapoint_info!(
@@ -2012,7 +2015,9 @@ mod tests {
     use {
         super::*,
         crossbeam_channel::{bounded, RecvTimeoutError},
-        solana_client::connection_cache::{DEFAULT_TPU_CONNECTION_POOL_SIZE, DEFAULT_TPU_USE_QUIC},
+        solana_client::connection_cache::{
+            DEFAULT_TPU_CONNECTION_POOL_SIZE, DEFAULT_TPU_ENABLE_UDP, DEFAULT_TPU_USE_QUIC,
+        },
         solana_ledger::{create_new_tmp_ledger, genesis_utils::create_genesis_config_with_leader},
         solana_sdk::{genesis_config::create_genesis_config, poh_config::PohConfig},
         std::{fs::remove_dir_all, thread, time::Duration},
@@ -2054,7 +2059,9 @@ mod tests {
             SocketAddrSpace::Unspecified,
             DEFAULT_TPU_USE_QUIC,
             DEFAULT_TPU_CONNECTION_POOL_SIZE,
+            DEFAULT_TPU_ENABLE_UDP,
         );
+
         assert_eq!(
             *start_progress.read().unwrap(),
             ValidatorStartProgress::Running
@@ -2153,6 +2160,7 @@ mod tests {
                     SocketAddrSpace::Unspecified,
                     DEFAULT_TPU_USE_QUIC,
                     DEFAULT_TPU_CONNECTION_POOL_SIZE,
+                    DEFAULT_TPU_ENABLE_UDP,
                 )
             })
             .collect();

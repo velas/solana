@@ -19,8 +19,10 @@ use {
         keypair::SKIP_SEED_PHRASE_VALIDATION_ARG,
     },
     solana_client::{
-        connection_cache::DEFAULT_TPU_CONNECTION_POOL_SIZE, rpc_client::RpcClient,
-        rpc_config::RpcLeaderScheduleConfig, rpc_request::MAX_MULTIPLE_ACCOUNTS,
+        connection_cache::{DEFAULT_TPU_CONNECTION_POOL_SIZE, DEFAULT_TPU_ENABLE_UDP},
+        rpc_client::RpcClient,
+        rpc_config::RpcLeaderScheduleConfig,
+        rpc_request::MAX_MULTIPLE_ACCOUNTS,
     },
     solana_core::{
         ledger_cleanup_service::{DEFAULT_MAX_LEDGER_SHREDS, DEFAULT_MIN_MAX_LEDGER_SHREDS},
@@ -1224,13 +1226,27 @@ pub fn main() {
             Arg::with_name("tpu_use_quic")
                 .long("tpu-use-quic")
                 .takes_value(false)
+                .hidden(true)
+                .conflicts_with("tpu_disable_quic")
                 .help("Use QUIC to send transactions."),
+        )
+        .arg(
+            Arg::with_name("tpu_disable_quic")
+                .long("tpu-disable-quic")
+                .takes_value(false)
+                .help("Do not use QUIC to send transactions."),
+        )
+        .arg(
+            Arg::with_name("tpu_enable_udp")
+                .long("tpu-enable-udp")
+                .takes_value(false)
+                .help("Enable UDP for receiving/sending transactions."),
         )
         .arg(
             Arg::with_name("disable_quic_servers")
                 .long("disable-quic-servers")
                 .takes_value(false)
-                .help("Disable QUIC TPU servers"),
+                .hidden(true)
         )
         .arg(
             Arg::with_name("enable_quic_servers")
@@ -2380,8 +2396,13 @@ pub fn main() {
     let restricted_repair_only_mode = matches.is_present("restricted_repair_only_mode");
     let accounts_shrink_optimize_total_space =
         value_t_or_exit!(matches, "accounts_shrink_optimize_total_space", bool);
-    let tpu_use_quic = matches.is_present("tpu_use_quic");
-    let enable_quic_servers = !matches.is_present("disable_quic_servers");
+    let tpu_use_quic = !matches.is_present("tpu_disable_quic");
+    let tpu_enable_udp = if matches.is_present("tpu_enable_udp") {
+        true
+    } else {
+        DEFAULT_TPU_ENABLE_UDP
+    };
+
     let tpu_connection_pool_size = value_t_or_exit!(matches, "tpu_connection_pool_size", usize);
 
     let shrink_ratio = value_t_or_exit!(matches, "accounts_shrink_ratio", f64);
@@ -2553,6 +2574,9 @@ pub fn main() {
 
     if matches.is_present("enable_quic_servers") {
         warn!("--enable-quic-servers is now the default behavior. This flag is deprecated and can be removed from the launch args");
+    }
+    if matches.is_present("disable_quic_servers") {
+        warn!("--disable-quic-servers is deprecated. The quic server cannot be disabled.");
     }
 
     let rpc_bigtable_config = if matches.is_present("enable_rpc_bigtable_ledger_storage")
@@ -2728,7 +2752,6 @@ pub fn main() {
         tpu_coalesce_ms,
         no_wait_for_vote_to_start_leader: matches.is_present("no_wait_for_vote_to_start_leader"),
         accounts_shrink_ratio,
-        enable_quic_servers,
         verify_evm_state: !matches.is_present("no_verify_evm_state"),
         jaeger_collector_url: value_of(&matches, "jaeger_collector_url"),
         ..ValidatorConfig::default()
@@ -3128,6 +3151,7 @@ pub fn main() {
         socket_addr_space,
         tpu_use_quic,
         tpu_connection_pool_size,
+        tpu_enable_udp,
     );
     *admin_service_post_init.write().unwrap() =
         Some(admin_rpc_service::AdminRpcRequestMetadataPostInit {
