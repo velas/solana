@@ -23,8 +23,8 @@ use {
         entrypoint::{BPF_ALIGN_OF_U128, MAX_PERMITTED_DATA_INCREASE, SUCCESS},
         feature_set::{
             self, add_get_processed_sibling_instruction_syscall, blake3_syscall_enabled,
-            check_physical_overlapping, disable_fees_sysvar, do_support_realloc,
-            executables_incur_cpi_data_cost, fixed_memcpy_nonoverlapping_check,
+            check_physical_overlapping, check_syscall_outputs_do_not_overlap, disable_fees_sysvar,
+            do_support_realloc, executables_incur_cpi_data_cost, fixed_memcpy_nonoverlapping_check,
             limit_secp256k1_recovery_id, prevent_calling_precompiles_as_programs,
             quick_bail_on_panic, return_data_syscall_enabled, secp256k1_recover_syscall_enabled,
             sol_log_data_syscall_enabled, syscall_saturated_math, update_syscall_base_costs,
@@ -1067,6 +1067,18 @@ impl<'a, 'b> SyscallObject<BpfError> for SyscallTryFindProgramAddress<'a, 'b> {
                         translate_slice_mut::<u8>(memory_mapping, address_addr, 32, loader_id),
                         result
                     );
+                    if !is_nonoverlapping(
+                        bump_seed_ref as *const _ as usize,
+                        std::mem::size_of_val(bump_seed_ref),
+                        address.as_ptr() as usize,
+                        std::mem::size_of::<Pubkey>(),
+                    ) && invoke_context
+                        .feature_set
+                        .is_active(&check_syscall_outputs_do_not_overlap::id())
+                    {
+                        *result = Err(SyscallError::CopyOverlapping.into());
+                        return;
+                    }
                     *bump_seed_ref = bump_seed[0];
                     address.copy_from_slice(new_address.as_ref());
                     *result = Ok(0);
@@ -1473,7 +1485,7 @@ impl<'a, 'b> SyscallObject<BpfError> for SyscallMemcpy<'a, 'b> {
 
         #[allow(clippy::collapsible_else_if)]
         if use_fixed_nonoverlapping_check {
-            if !is_nonoverlapping(src_addr, dst_addr, n) {
+            if !is_nonoverlapping(src_addr, n, dst_addr, n) {
                 *result = Err(SyscallError::CopyOverlapping.into());
                 return;
             }
@@ -1501,7 +1513,7 @@ impl<'a, 'b> SyscallObject<BpfError> for SyscallMemcpy<'a, 'b> {
         )
         .as_ptr();
         if do_check_physical_overlapping
-            && !is_nonoverlapping(src_ptr as usize, dst_ptr as usize, n as usize)
+            && !is_nonoverlapping(src_ptr as usize, n as usize, dst_ptr as usize, n as usize)
         {
             unsafe {
                 std::ptr::copy(src_ptr, dst_ptr, n as usize);
@@ -3416,6 +3428,19 @@ impl<'a, 'b> SyscallObject<BpfError> for SyscallGetReturnData<'a, 'b> {
                 result
             );
 
+            if !is_nonoverlapping(
+                to_slice.as_ptr() as usize,
+                length as usize,
+                program_id_result as *const _ as usize,
+                std::mem::size_of::<Pubkey>(),
+            ) && invoke_context
+                .feature_set
+                .is_active(&check_syscall_outputs_do_not_overlap::id())
+            {
+                *result = Err(SyscallError::CopyOverlapping.into());
+                return;
+            }
+
             *program_id_result = *program_id;
         }
 
@@ -3556,10 +3581,7 @@ impl<'a, 'b> SyscallObject<BpfError> for SyscallGetProcessedSiblingInstruction<'
         };
 
         if let Some(instruction_context) = instruction_context {
-            let ProcessedSiblingInstruction {
-                data_len,
-                accounts_len,
-            } = question_mark!(
+            let result_header = question_mark!(
                 translate_type_mut::<ProcessedSiblingInstruction>(
                     memory_mapping,
                     meta_addr,
@@ -3568,8 +3590,9 @@ impl<'a, 'b> SyscallObject<BpfError> for SyscallGetProcessedSiblingInstruction<'
                 result
             );
 
-            if *data_len == instruction_context.get_instruction_data().len()
-                && *accounts_len == instruction_context.get_number_of_instruction_accounts()
+            if result_header.data_len == instruction_context.get_instruction_data().len()
+                && result_header.accounts_len
+                    == instruction_context.get_number_of_instruction_accounts()
             {
                 let program_id = question_mark!(
                     translate_type_mut::<Pubkey>(memory_mapping, program_id_addr, loader_id),
@@ -3579,7 +3602,7 @@ impl<'a, 'b> SyscallObject<BpfError> for SyscallGetProcessedSiblingInstruction<'
                     translate_slice_mut::<u8>(
                         memory_mapping,
                         data_addr,
-                        *data_len as u64,
+                        result_header.data_len as u64,
                         loader_id,
                     ),
                     result
@@ -3588,11 +3611,52 @@ impl<'a, 'b> SyscallObject<BpfError> for SyscallGetProcessedSiblingInstruction<'
                     translate_slice_mut::<AccountMeta>(
                         memory_mapping,
                         accounts_addr,
-                        *accounts_len as u64,
+                        result_header.accounts_len as u64,
                         loader_id,
                     ),
                     result
                 );
+
+                if (!is_nonoverlapping(
+                    result_header as *const _ as usize,
+                    std::mem::size_of::<ProcessedSiblingInstruction>(),
+                    program_id as *const _ as usize,
+                    std::mem::size_of::<Pubkey>(),
+                ) || !is_nonoverlapping(
+                    result_header as *const _ as usize,
+                    std::mem::size_of::<ProcessedSiblingInstruction>(),
+                    accounts.as_ptr() as usize,
+                    std::mem::size_of::<AccountMeta>()
+                        .saturating_mul(result_header.accounts_len as usize),
+                ) || !is_nonoverlapping(
+                    result_header as *const _ as usize,
+                    std::mem::size_of::<ProcessedSiblingInstruction>(),
+                    data.as_ptr() as usize,
+                    result_header.data_len as usize,
+                ) || !is_nonoverlapping(
+                    program_id as *const _ as usize,
+                    std::mem::size_of::<Pubkey>(),
+                    data.as_ptr() as usize,
+                    result_header.data_len as usize,
+                ) || !is_nonoverlapping(
+                    program_id as *const _ as usize,
+                    std::mem::size_of::<Pubkey>(),
+                    accounts.as_ptr() as usize,
+                    std::mem::size_of::<AccountMeta>()
+                        .saturating_mul(result_header.accounts_len as usize),
+                ) || !is_nonoverlapping(
+                    data.as_ptr() as usize,
+                    result_header.data_len as usize,
+                    accounts.as_ptr() as usize,
+                    std::mem::size_of::<AccountMeta>()
+                        .saturating_mul(result_header.accounts_len as usize),
+                )) && invoke_context
+                    .feature_set
+                    .is_active(&check_syscall_outputs_do_not_overlap::id())
+                {
+                    *result = Err(SyscallError::CopyOverlapping.into());
+                    return;
+                }
 
                 *program_id =
                     instruction_context.get_program_id(invoke_context.transaction_context);
@@ -3614,8 +3678,8 @@ impl<'a, 'b> SyscallObject<BpfError> for SyscallGetProcessedSiblingInstruction<'
                 );
                 accounts.clone_from_slice(account_metas.as_slice());
             }
-            *data_len = instruction_context.get_instruction_data().len();
-            *accounts_len = instruction_context.get_number_of_instruction_accounts();
+            result_header.data_len = instruction_context.get_instruction_data().len();
+            result_header.accounts_len = instruction_context.get_number_of_instruction_accounts();
             *result = Ok(true as u64);
             return;
         }

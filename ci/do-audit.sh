@@ -41,5 +41,14 @@ cargo_audit_ignores=(
   # https://rustsec.org/advisories/RUSTSEC-2022-0046
   --ignore RUSTSEC-2022-0046
 
+  # tokio: vulnerability affecting named pipes on Windows
+  #
+  # Not worth upgrading tokio version on a stable branch
+  --ignore RUSTSEC-2023-0001
+
+  # remove_dir_all: reqwest -> hyper-tls -> tempfile dependency
+  #
+  # Latest reqwest doesn't seem to work
+  --ignore RUSTSEC-2023-0018
 )
 scripts/cargo-for-all-lock-files.sh stable audit "${cargo_audit_ignores[@]}"

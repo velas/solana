@@ -3982,7 +3982,7 @@ impl Blockstore {
     // given slot and index as this implies the leader generated two different shreds with
     // the same slot and index
     pub fn is_shred_duplicate(&self, shred: ShredId, mut payload: Vec<u8>) -> Option<Vec<u8>> {
-        let (slot, index, shred_type) = shred.unwrap();
+        let (slot, index, shred_type) = shred.unpack();
         let existing_shred = match shred_type {
             ShredType::Data => self.get_data_shred(slot, index as u64),
             ShredType::Code => self.get_coding_shred(slot, index as u64),
@@ -4553,14 +4553,14 @@ fn handle_chaining_for_slot(
     // update all child slots with `is_connected` = true because these children are also now newly
     // connected to trunk of the ledger
     let should_propagate_is_connected =
-        is_newly_completed_slot(&RefCell::borrow(meta), meta_backup)
-            && RefCell::borrow(meta).is_connected;
+        is_newly_completed_slot(&RefCell::borrow(&*meta), meta_backup)
+            && RefCell::borrow(&*meta).is_connected();
 
     if should_propagate_is_connected {
         // slot_function returns a boolean indicating whether to explore the children
         // of the input slot
         let slot_function = |slot: &mut SlotMeta| {
-            slot.is_connected = true;
+            slot.set_connected();
 
             // We don't want to set the is_connected flag on the children of non-full
             // slots
@@ -4640,7 +4640,9 @@ fn chain_new_slot_to_prev_slot(
     current_slot_meta: &mut SlotMeta,
 ) {
     prev_slot_meta.next_slots.push(current_slot);
-    current_slot_meta.is_connected = prev_slot_meta.is_connected && prev_slot_meta.is_full();
+    if prev_slot_meta.is_connected() && prev_slot_meta.is_full() {
+        current_slot_meta.set_connected();
+    }
 }
 
 fn is_newly_completed_slot(slot_meta: &SlotMeta, backup_slot_meta: &Option<SlotMeta>) -> bool {
@@ -4654,7 +4656,7 @@ fn slot_has_updates(slot_meta: &SlotMeta, slot_meta_backup: &Option<SlotMeta>) -
     // from block 0, which is true iff:
     // 1) The block with index prev_block_index is itself part of the trunk of consecutive blocks
     // starting from block 0,
-    slot_meta.is_connected &&
+    slot_meta.is_connected() &&
         // AND either:
         // 1) The slot didn't exist in the database before, and now we have a consecutive
         // block for that slot
@@ -5594,7 +5596,7 @@ pub mod tests {
         assert_eq!(meta.parent_slot, Some(0));
         assert_eq!(meta.last_index, Some(num_shreds - 1));
         assert!(meta.next_slots.is_empty());
-        assert!(meta.is_connected);
+        assert!(meta.is_connected());
     }
 
     #[test]
@@ -6058,7 +6060,7 @@ pub mod tests {
         let s1 = blockstore.meta(1).unwrap().unwrap();
         assert!(s1.next_slots.is_empty());
         // Slot 1 is not trunk because slot 0 hasn't been inserted yet
-        assert!(!s1.is_connected);
+        assert!(!s1.is_connected());
         assert_eq!(s1.parent_slot, Some(0));
         assert_eq!(s1.last_index, Some(shreds_per_slot as u64 - 1));
 
@@ -6070,7 +6072,7 @@ pub mod tests {
         let s2 = blockstore.meta(2).unwrap().unwrap();
         assert!(s2.next_slots.is_empty());
         // Slot 2 is not trunk because slot 0 hasn't been inserted yet
-        assert!(!s2.is_connected);
+        assert!(!s2.is_connected());
         assert_eq!(s2.parent_slot, Some(1));
         assert_eq!(s2.last_index, Some(shreds_per_slot as u64 - 1));
 
@@ -6078,7 +6080,7 @@ pub mod tests {
         // but still isn't part of the trunk
         let s1 = blockstore.meta(1).unwrap().unwrap();
         assert_eq!(s1.next_slots, vec![2]);
-        assert!(!s1.is_connected);
+        assert!(!s1.is_connected());
         assert_eq!(s1.parent_slot, Some(0));
         assert_eq!(s1.last_index, Some(shreds_per_slot as u64 - 1));
 
@@ -6097,7 +6099,7 @@ pub mod tests {
                 assert_eq!(s.parent_slot, Some(i - 1));
             }
             assert_eq!(s.last_index, Some(shreds_per_slot as u64 - 1));
-            assert!(s.is_connected);
+            assert!(s.is_connected());
         }
     }
 
@@ -6151,9 +6153,9 @@ pub mod tests {
             }
 
             if i == 0 {
-                assert!(s.is_connected);
+                assert!(s.is_connected());
             } else {
-                assert!(!s.is_connected);
+                assert!(!s.is_connected());
             }
         }
 
@@ -6178,7 +6180,7 @@ pub mod tests {
                 assert_eq!(s.parent_slot, Some(i - 1));
             }
             assert_eq!(s.last_index, Some(shreds_per_slot as u64 - 1));
-            assert!(s.is_connected);
+            assert!(s.is_connected());
         }
     }
 
@@ -6230,9 +6232,9 @@ pub mod tests {
 
             // Other than slot 0, no slots should be part of the trunk
             if i != 0 {
-                assert!(!s.is_connected);
+                assert!(!s.is_connected());
             } else {
-                assert!(s.is_connected);
+                assert!(s.is_connected());
             }
         }
 
@@ -6251,9 +6253,9 @@ pub mod tests {
                         assert!(s.next_slots.is_empty());
                     }
                     if i <= slot_index as u64 + 3 {
-                        assert!(s.is_connected);
+                        assert!(s.is_connected());
                     } else {
-                        assert!(!s.is_connected);
+                        assert!(!s.is_connected());
                     }
 
                     if i == 0 {
@@ -6333,7 +6335,7 @@ pub mod tests {
                 let slot_meta = blockstore.meta(slot).unwrap().unwrap();
                 assert_eq!(slot_meta.consumed, entries_per_slot);
                 assert_eq!(slot_meta.received, entries_per_slot);
-                assert!(slot_meta.is_connected);
+                assert!(slot_meta.is_connected());
                 let slot_parent = {
                     if slot == 0 {
                         0

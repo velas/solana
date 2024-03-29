@@ -132,28 +132,25 @@ impl LedgerCleanupService {
     /// A helper function to `cleanup_ledger` which returns a tuple of the
     /// following four elements suggesting whether to clean up the ledger:
     ///
-    /// Return value (bool, Slot, Slot, u64):
+    /// Return value (bool, Slot, u64):
     /// - `slots_to_clean` (bool): a boolean value indicating whether there
     /// are any slots to clean.  If true, then `cleanup_ledger` function
     /// will then proceed with the ledger cleanup.
-    /// - `first_slot_to_purge` (Slot): the first slot to purge.
-    /// - `lowest_slot_to_puerge` (Slot): the lowest slot to purge.  Together
-    ///   with `first_slot_to_purge`, the two Slot values represent the
-    ///   range of the clean up.
+    /// - `lowest_slot_to_purge` (Slot): the lowest slot to purge.  Any
+    ///   slot which is older or equal to `lowest_slot_to_purge` will be
+    ///   cleaned up.
     /// - `total_shreds` (u64): the total estimated number of shreds before the
     ///   `root`.
     fn find_slots_to_clean(
         blockstore: &Arc<Blockstore>,
         root: Slot,
         max_ledger_shreds: u64,
-    ) -> (bool, Slot, Slot, u64) {
+    ) -> (bool, Slot, u64) {
         let mut total_slots = Vec::new();
         let mut iterate_time = Measure::start("iterate_time");
         let mut total_shreds = 0;
-        let mut first_slot = 0;
         for (i, (slot, meta)) in blockstore.slot_meta_iterator(0).unwrap().enumerate() {
             if i == 0 {
-                first_slot = slot;
                 debug!("purge: searching from slot: {}", slot);
             }
             // Not exact since non-full slots will have holes
@@ -165,27 +162,26 @@ impl LedgerCleanupService {
         }
         iterate_time.stop();
         info!(
-            "first_slot={} total_slots={} total_shreds={} max_ledger_shreds={}, {}",
-            first_slot,
+            "total_slots={} total_shreds={} max_ledger_shreds={}, {}",
             total_slots.len(),
             total_shreds,
             max_ledger_shreds,
             iterate_time
         );
-        if (total_shreds) < max_ledger_shreds {
-            return (false, 0, 0, total_shreds);
+        if (total_shreds as u64) < max_ledger_shreds {
+            return (false, 0, total_shreds);
         }
         let mut num_shreds_to_clean = 0;
         let mut lowest_cleanup_slot = total_slots[0].0;
         for (slot, num_shreds) in total_slots.iter().rev() {
-            num_shreds_to_clean += *num_shreds;
+            num_shreds_to_clean += *num_shreds as u64;
             if num_shreds_to_clean > max_ledger_shreds {
                 lowest_cleanup_slot = *slot;
                 break;
             }
         }
 
-        (true, first_slot, lowest_cleanup_slot, total_shreds)
+        (true, lowest_cleanup_slot, total_shreds)
     }
 
     fn receive_new_roots(new_root_receiver: &Receiver<Slot>) -> Result<Slot, RecvTimeoutError> {
@@ -243,11 +239,11 @@ impl LedgerCleanupService {
 
         *last_purge_slot = root;
 
-        let (slots_to_clean, purge_first_slot, lowest_cleanup_slot, total_shreds) =
+        let (slots_to_clean, lowest_cleanup_slot, total_shreds) =
             Self::find_slots_to_clean(blockstore, root, max_ledger_shreds);
         let mut first_purged_evm_block_num = 0;
         let mut last_purged_evm_block_num = 0;
-        if let Ok(mut iter) = blockstore.evm_block_by_slot_iterator(purge_first_slot) {
+        if let Ok(mut iter) = blockstore.evm_block_by_slot_iterator(lowest_cleanup_slot) {
             if let Some(item) = iter.next() {
                 first_purged_evm_block_num = item.1;
             }
@@ -272,18 +268,12 @@ impl LedgerCleanupService {
                     *blockstore.lowest_cleanup_slot.write() = lowest_cleanup_slot;
                     slot_update_time.stop();
 
-                    info!(
-                        "purging data from slots {} to {}",
-                        purge_first_slot, lowest_cleanup_slot
-                    );
+                    info!("purging data older than {}", lowest_cleanup_slot);
 
                     let mut purge_time = Measure::start("purge_slots");
 
-                    blockstore.purge_slots(
-                        purge_first_slot,
-                        lowest_cleanup_slot,
-                        PurgeType::CompactionFilter,
-                    );
+                    // purge any slots older than lowest_cleanup_slot.
+                    blockstore.purge_slots(0, lowest_cleanup_slot, PurgeType::CompactionFilter);
                     // Update only after purge operation.
                     // Safety: This value can be used by compaction_filters shared via Arc<AtomicU64>.
                     // Compactions are async and run as a multi-threaded background job. However, this
@@ -338,7 +328,12 @@ impl LedgerCleanupService {
     ) {
         let first_purged_evm_block = first_purged_evm_block.load(Ordering::Relaxed);
         let last_purged_evm_block = last_purged_evm_block.load(Ordering::Relaxed);
-        let evm_block_compaction_range = Some((first_purged_evm_block, last_purged_evm_block.checked_add(1).unwrap_or(BlockNum::MAX)));
+        let evm_block_compaction_range = Some((
+            first_purged_evm_block,
+            last_purged_evm_block
+                .checked_add(1)
+                .unwrap_or(BlockNum::MAX),
+        ));
         let highest_compaction_slot = highest_compact_slot.load(Ordering::Relaxed);
         if highest_compaction_slot.saturating_sub(*last_compaction_slot)
             > (compaction_interval + *compaction_jitter)
