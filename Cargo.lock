@@ -2068,6 +2068,7 @@ dependencies = [
  "serde_json",
  "solana-client",
  "solana-evm-loader-program",
+ "solana-program 1.10.41",
  "solana-sdk 1.10.41",
  "solana-storage-bigtable",
  "solana-transaction-status",

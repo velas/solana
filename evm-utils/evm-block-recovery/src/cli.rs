@@ -51,7 +51,8 @@ pub enum Command {
 
     ScanEvmStateRoots(ScanEvmStateRootsArgs),
 
-    ScratchPad,
+    /// Get ledger for the provided address
+    AccountLedger(AccountLedgerArgs),
 
     /// Generetes Shell Completions for this Utility
     Completion(CompletionArgs),
@@ -258,9 +259,45 @@ pub struct ScanEvmStateRootsArgs {
 }
 
 #[derive(clap::Args)]
+pub struct AccountLedgerArgs {
+    /// Address to search for
+    #[clap(short, long, value_name = "PUBKEY")]
+    pub address: String,
+
+    /// Start with the first signature older than this one
+    #[clap(short, long, value_name = "SIGNATURE")]
+    pub before_signature: Option<String>,
+
+    /// End with the last signature more recent than this one
+    #[clap(short, long, value_name = "SIGNATURE")]
+    pub until_signature: Option<String>,
+
+    /// Stop after this many signatures
+    #[clap(short, long, value_name = "NUM")]
+    pub limit: usize,
+
+    /// Export CSV results to file
+    #[clap(short, long, value_hint = clap::ValueHint::FilePath, value_name = "FILEPATH")]
+    pub output: PathBuf,
+
+    /// CSV column separator
+    #[clap(short, long, value_name = "STRING", value_enum, default_value_t = CsvSeparator::Semicolon)]
+    pub separator: CsvSeparator,
+}
+
+#[derive(Clone, clap::ValueEnum)]
+pub enum CsvSeparator {
+    /// Use Comma as separator in CSV output
+    Comma,
+    /// Use Semicolon as separator in CSV output
+    Semicolon,
+    /// Use Tabulation as separator in CSV output
+    Tab,
+}
+
+#[derive(clap::Args)]
 pub struct CompletionArgs {
     /// Which shell completions to generate
-    #[arg(value_enum)]
-    #[clap(long, value_name = "STRING")]
+    #[clap(long, value_enum, value_name = "STRING")]
     pub shell: clap_complete::Shell,
 }

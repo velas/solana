@@ -1,3 +1,4 @@
+pub(crate) mod account_ledger;
 pub(crate) mod check_evm;
 pub(crate) mod check_native;
 pub(crate) mod compare;
@@ -7,12 +8,11 @@ pub(crate) mod repeat;
 pub(crate) mod restore_chain;
 pub(crate) mod scan_evm_state_roots;
 pub(crate) mod upload;
-// a tmp placeholder to test out various new commands or approaches
-// it's convenient, as all potentially required dependencies have been imported
-pub(crate) mod scratchpad;
 
 use crate::error::AppError;
+
 pub use {
+    account_ledger::account_ledger,
     check_evm::check_evm,
     check_native::check_native,
     compare::compare_native,
