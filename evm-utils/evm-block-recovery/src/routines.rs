@@ -4,6 +4,7 @@ pub(crate) mod check_native;
 pub(crate) mod compare;
 pub(crate) mod completion;
 pub(crate) mod find;
+pub(crate) mod native_by_evm;
 pub(crate) mod repeat;
 pub(crate) mod restore_chain;
 pub(crate) mod scan_evm_state_roots;
@@ -18,6 +19,7 @@ pub use {
     compare::compare_native,
     completion::completion,
     find::{find_evm, find_native},
+    native_by_evm::native_by_evm,
     repeat::{repeat_evm, repeat_native},
     restore_chain::restore_chain,
     upload::upload,

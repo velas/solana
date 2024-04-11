@@ -34,7 +34,7 @@ pub enum Command {
     /// Checks content of Native Block
     CheckNative(CheckNativeArgs),
 
-    /// Checks content of Evm Block
+    /// Checks content of EVM Block
     CheckEvm(CheckEvmArgs),
 
     /// Compares difference of Native Block sets
@@ -51,8 +51,11 @@ pub enum Command {
 
     ScanEvmStateRoots(ScanEvmStateRootsArgs),
 
-    /// Get ledger for the provided address
+    /// Gets Ledger for the provided Native Address
     AccountLedger(AccountLedgerArgs),
+
+    /// Gets underlying Native Transaction for provided EVM transaction
+    NativeByEvm(NativeByEvmArgs),
 
     /// Generetes Shell Completions for this Utility
     Completion(CompletionArgs),
@@ -293,6 +296,13 @@ pub enum CsvSeparator {
     Semicolon,
     /// Use Tabulation as separator in CSV output
     Tab,
+}
+
+#[derive(clap::Args)]
+pub struct NativeByEvmArgs {
+    /// EVM Transaction Hash
+    #[clap(long, value_enum, value_name = "H256")]
+    pub hash: String,
 }
 
 #[derive(clap::Args)]

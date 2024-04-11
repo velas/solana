@@ -50,6 +50,7 @@ async fn main() {
         RepeatNative(args) => repeat_native(args).await,
         ScanEvmStateRoots(ref args) => scan_evm_state_roots::command(args).await,
         AccountLedger(args) => account_ledger(cli.creds, cli.instance, args).await,
+        NativeByEvm(args) => native_by_evm(cli.creds, cli.instance, args).await,
         Completion(args) => completion(args),
     };
 
