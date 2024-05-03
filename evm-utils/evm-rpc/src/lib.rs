@@ -331,6 +331,8 @@ pub enum BlockId {
     RelativeId(BlockRelId),
 }
 
+pub type ChainID = u64;
+
 impl fmt::Display for BlockId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -851,6 +853,131 @@ pub mod chain {
             meta: Self::Metadata,
             block: String,
         ) -> Result<Hex<usize>, Error>;
+    }
+
+    pub trait ChainIDERPC {
+        type Metadata;
+
+        fn block_number(&self, meta: Self::Metadata, chain_id: ChainID) -> BoxFuture<Result<Hex<usize>, Error>>;
+
+        fn balance(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            address: Address,
+            block: Option<BlockId>,
+        ) -> BoxFuture<Result<U256, Error>>;
+
+        fn storage_at(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            address: Address,
+            data: U256,
+            block: Option<BlockId>,
+        ) -> BoxFuture<Result<H256, Error>>;
+
+        fn transaction_count(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            address: Address,
+            block: Option<BlockId>,
+        ) -> BoxFuture<Result<U256, Error>>;
+
+        fn block_transaction_count_by_hash(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            block_hash: H256,
+        ) -> BoxFuture<Result<Hex<usize>, Error>>;
+
+        fn block_transaction_count_by_number(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            block: BlockId,
+        ) -> BoxFuture<Result<Hex<usize>, Error>>;
+
+        fn code(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            address: Address,
+            block: Option<BlockId>,
+        ) -> BoxFuture<Result<Bytes, Error>>;
+
+        fn block_by_hash(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            block_hash: H256,
+            full: bool,
+        ) -> BoxFuture<Result<Option<RPCBlock>, Error>>;
+
+        fn block_by_number(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            block: BlockId,
+            full: bool,
+        ) -> BoxFuture<Result<Option<RPCBlock>, Error>>;
+
+        fn transaction_by_hash(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            tx_hash: H256,
+        ) -> BoxFuture<Result<Option<RPCTransaction>, Error>>;
+
+        fn transaction_by_block_hash_and_index(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            block_hash: H256,
+            tx_id: Hex<usize>,
+        ) -> BoxFuture<Result<Option<RPCTransaction>, Error>>;
+
+        fn transaction_by_block_number_and_index(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            block: BlockId,
+            tx_id: Hex<usize>,
+        ) -> BoxFuture<Result<Option<RPCTransaction>, Error>>;
+
+        fn transaction_receipt(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            tx_hash: H256,
+        ) -> BoxFuture<Result<Option<RPCReceipt>, Error>>;
+
+        fn call(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            tx: RPCTransaction,
+            block: Option<BlockId>,
+            meta_keys: Option<Vec<String>>,
+        ) -> BoxFuture<Result<Bytes, Error>>;
+
+        fn estimate_gas(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            tx: RPCTransaction,
+            block: Option<BlockId>,
+            meta_keys: Option<Vec<String>>,
+        ) -> BoxFuture<Result<Gas, Error>>;
+
+        fn logs(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+            log_filter: RPCLogFilter,
+        ) -> BoxFuture<Result<Vec<RPCLog>, Error>>;
+
     }
 }
 
