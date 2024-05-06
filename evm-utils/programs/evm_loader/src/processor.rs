@@ -1117,11 +1117,11 @@ mod test {
         let address = secret_key.to_address();
         evm_context.deposit_evm(
             address,
-            U256::from(crate::evm::LAMPORTS_TO_GWEI_PRICE) * 300000u32,
+            U256::from(crate::evm::GWEI_PER_LAMPORT) * 300000u32,
         );
         let tx_create = evm::UnsignedTransaction {
             nonce: 0u32.into(),
-            gas_price: crate::evm::LAMPORTS_TO_GWEI_PRICE.into(),
+            gas_price: crate::evm::GWEI_PER_LAMPORT.into(),
             gas_limit: 300000u32.into(),
             action: TransactionAction::Create,
             value: 0u32.into(),

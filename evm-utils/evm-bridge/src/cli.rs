@@ -3,7 +3,7 @@ use {
     log::{info, warn},
     primitive_types::U256,
     solana_cli_config::Config,
-    solana_evm_loader_program::scope::evm::LAMPORTS_TO_GWEI_PRICE,
+    solana_evm_loader_program::scope::evm::GWEI_PER_LAMPORT,
     solana_sdk::fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
     std::{net::SocketAddr, time::Duration},
 };
@@ -66,7 +66,7 @@ fn default_native_keypair() -> String {
 fn default_min_gas_price() -> U256 {
     //TODO: Add gas logic
     // 21000 is smallest call in evm
-    ceil_to_gwei((21000 * LAMPORTS_TO_GWEI_PRICE / DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE).into())
+    ceil_to_gwei((21000 * GWEI_PER_LAMPORT / DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE).into())
 }
 
 fn parse_min_gas_price(arg: &str) -> Result<U256, String> {

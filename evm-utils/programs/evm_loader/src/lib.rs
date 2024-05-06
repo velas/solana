@@ -21,20 +21,24 @@ pub mod scope {
         pub use evm_state::*;
         pub use primitive_types::H160 as Address;
 
-        pub const LAMPORTS_TO_GWEI_PRICE: u64 = 1_000_000_000; // Lamports is 1/10^9 of SOLs while GWEI is 1/10^18
+        pub const GWEI_PER_LAMPORT: u64 = 1_000_000_000; // Lamports is 1/10^9 of SOLs while GWEI is 1/10^18
+
+        pub type Lamports = u64;
+        pub type Gwei = U256;
 
         // Convert lamports to gwei
-        pub fn lamports_to_gwei(lamports: u64) -> U256 {
-            U256::from(lamports) * U256::from(LAMPORTS_TO_GWEI_PRICE)
+        pub fn lamports_to_gwei(lamports: Lamports) -> Gwei {
+            U256::from(lamports) * U256::from(GWEI_PER_LAMPORT)
         }
 
         // Convert gweis back to lamports, return change as second element.
-        pub fn gweis_to_lamports(gweis: U256) -> (u64, U256) {
-            let lamports = gweis / U256::from(LAMPORTS_TO_GWEI_PRICE);
-            let gweis = gweis % U256::from(LAMPORTS_TO_GWEI_PRICE);
-            (lamports.as_u64(), gweis)
+        pub fn gweis_to_lamports(gweis: Gwei) -> (Lamports, Gwei) {
+            let lamports = gweis / U256::from(GWEI_PER_LAMPORT);
+            let remainder = gweis % U256::from(GWEI_PER_LAMPORT);
+            (lamports.as_u64(), remainder)
         }
     }
+
     pub mod solana {
         pub use solana_sdk::{
             evm_state, instruction::Instruction, pubkey::Pubkey as Address,
