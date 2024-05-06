@@ -35,7 +35,7 @@ pub fn next_account_info<'a, 'b, I: Iterator<Item = &'a KeyedAccount<'b>>>(
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct EvmProcessor {}
+pub struct EvmProcessor;
 
 impl EvmProcessor {
     pub fn process_instruction(

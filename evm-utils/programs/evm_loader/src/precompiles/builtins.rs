@@ -11,8 +11,8 @@ use primitive_types::H160;
 use super::abi_parse::ParseTokens;
 use super::{errors::*, CallResult};
 use super::{NativeContext, Result};
+use crate::account_structure::AccountStructure;
 use crate::scope::evm::gweis_to_lamports;
-use crate::AccountStructure;
 use solana_sdk::account::{ReadableAccount, WritableAccount};
 use solana_sdk::pubkey::Pubkey;
 

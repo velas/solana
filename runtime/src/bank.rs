@@ -34,6 +34,7 @@
 //! on behalf of the caller, and a low-level API for when they have
 //! already been signed and verified.
 use evm_state::EvmState;
+use solana_evm_loader_program::processor::EvmProcessor;
 use solana_sdk::message::AccountKeys;
 pub use solana_sdk::reward_type::RewardType;
 #[allow(deprecated)]
@@ -6112,9 +6113,7 @@ impl Bank {
         self.add_builtin(
             "evm_loader",
             &solana_sdk::evm_loader::id(),
-            |acc, data, context| {
-                solana_evm_loader_program::EvmProcessor {}.process_instruction(acc, data, context)
-            },
+            |acc, data, context| EvmProcessor.process_instruction(acc, data, context),
         );
 
         self.builtin_feature_transitions = Arc::new(builtins.feature_transitions);

@@ -1,6 +1,4 @@
-extern crate core;
-
-mod account_structure;
+pub mod account_structure;
 pub mod tx_chunks;
 
 pub mod error;
@@ -8,11 +6,6 @@ pub mod instructions;
 pub mod precompiles;
 pub mod processor;
 pub mod solana_extension;
-
-pub static ID: solana_sdk::pubkey::Pubkey = solana_sdk::evm_loader::ID;
-
-pub use account_structure::AccountStructure;
-pub use processor::EvmProcessor;
 
 /// Public API for intermediate eth <-> solana transfers
 pub mod scope {
@@ -51,12 +44,14 @@ use instructions::{
     EVM_INSTRUCTION_BORSH_PREFIX,
 };
 use scope::*;
-use solana_sdk::instruction::{AccountMeta, Instruction};
+use solana_sdk::instruction::AccountMeta;
+
+pub static ID: solana::Address = solana_sdk::evm_loader::ID;
 
 /// Create an evm instruction and add EVM_INSTRUCTION_BORSH_PREFIX prefix
 /// at the beginning of instruction data to mark Borsh encoding
 pub fn create_evm_instruction_with_borsh(
-    program_id: solana_sdk::pubkey::Pubkey,
+    program_id: solana::Address,
     data: &EvmInstruction,
     accounts: Vec<AccountMeta>,
 ) -> solana::Instruction {
@@ -67,11 +62,11 @@ pub fn create_evm_instruction_with_borsh(
 
 /// Create an old version of evm instruction
 pub fn create_evm_instruction_with_bincode(
-    program_id: solana_sdk::pubkey::Pubkey,
+    program_id: solana::Address,
     data: &v0::EvmInstruction,
     accounts: Vec<AccountMeta>,
 ) -> solana::Instruction {
-    Instruction::new_with_bincode(program_id, data, accounts)
+    solana::Instruction::new_with_bincode(program_id, data, accounts)
 }
 
 pub fn send_raw_tx(
