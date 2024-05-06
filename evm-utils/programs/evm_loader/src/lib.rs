@@ -39,6 +39,7 @@ pub mod scope {
         };
     }
 }
+
 use instructions::{
     v0, EvmBigTransaction, EvmInstruction, ExecuteTransaction, FeePayerType,
     EVM_INSTRUCTION_BORSH_PREFIX,
@@ -52,12 +53,18 @@ pub static ID: solana::Address = solana_sdk::evm_loader::ID;
 /// at the beginning of instruction data to mark Borsh encoding
 pub fn create_evm_instruction_with_borsh(
     program_id: solana::Address,
-    data: &EvmInstruction,
+    instruction: &EvmInstruction,
     accounts: Vec<AccountMeta>,
 ) -> solana::Instruction {
-    let mut res = Instruction::new_with_borsh(program_id, data, accounts);
-    res.data.insert(0, EVM_INSTRUCTION_BORSH_PREFIX);
-    res
+    use borsh::BorshSerialize;
+
+    let mut data = vec![EVM_INSTRUCTION_BORSH_PREFIX];
+    instruction.serialize(&mut data).unwrap();
+    solana::Instruction {
+        accounts,
+        program_id,
+        data,
+    }
 }
 
 /// Create an old version of evm instruction
