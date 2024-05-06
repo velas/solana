@@ -100,30 +100,6 @@ pub fn send_raw_tx(
     )
 }
 
-pub fn authorized_tx(
-    sender: solana::Address,
-    unsigned_tx: evm::UnsignedTransaction,
-    fee_type: FeePayerType,
-) -> solana::Instruction {
-    let account_metas = vec![
-        AccountMeta::new(solana::evm_state::ID, false),
-        AccountMeta::new(sender, true),
-    ];
-
-    let from = evm_address_for_program(sender);
-    create_evm_instruction_with_borsh(
-        crate::ID,
-        &EvmInstruction::ExecuteTransaction {
-            tx: ExecuteTransaction::ProgramAuthorized {
-                tx: Some(unsigned_tx),
-                from,
-            },
-            fee_type,
-        },
-        account_metas,
-    )
-}
-
 pub(crate) fn transfer_native_to_evm(
     owner: solana::Address,
     lamports: u64,

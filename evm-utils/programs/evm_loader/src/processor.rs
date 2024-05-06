@@ -958,6 +958,30 @@ mod test {
         }
     }
 
+    pub fn authorized_tx(
+        sender: solana::Address,
+        unsigned_tx: evm::UnsignedTransaction,
+        fee_type: FeePayerType,
+    ) -> solana::Instruction {
+        let account_metas = vec![
+            AccountMeta::new(solana::evm_state::ID, false),
+            AccountMeta::new(sender, true),
+        ];
+
+        let from = crate::evm_address_for_program(sender);
+        crate::create_evm_instruction_with_borsh(
+            crate::ID,
+            &EvmInstruction::ExecuteTransaction {
+                tx: ExecuteTransaction::ProgramAuthorized {
+                    tx: Some(unsigned_tx),
+                    from,
+                },
+                fee_type,
+            },
+            account_metas,
+        )
+    }
+
     fn dummy_eth_tx() -> evm_state::transactions::Transaction {
         evm_state::transactions::Transaction {
             nonce: U256::zero(),
@@ -1755,7 +1779,7 @@ mod test {
             crate::transfer_native_to_evm(signer, 1, tx_call.address().unwrap()),
             crate::free_ownership(signer),
             crate::send_raw_tx(signer, tx_call, None, FeePayerType::Evm),
-            crate::authorized_tx(signer, unsigned_tx, FeePayerType::Evm),
+            authorized_tx(signer, unsigned_tx, FeePayerType::Evm),
         ]
     }
 
@@ -2133,7 +2157,7 @@ mod test {
             crate::evm_address_for_program(user_id),
             U256::from(2u32) * 300000u32,
         );
-        let ix = crate::authorized_tx(user_id, unsigned_tx, FeePayerType::Evm);
+        let ix = authorized_tx(user_id, unsigned_tx, FeePayerType::Evm);
         let mut ix_clone = ix.clone();
         // remove signer marker from account meta to simulate unsigned tx
         ix_clone.accounts.last_mut().unwrap().is_signer = false;
@@ -2188,7 +2212,7 @@ mod test {
         }
         .tx_id_hash();
 
-        let ix = crate::authorized_tx(user_id, unsigned_tx, FeePayerType::Evm);
+        let ix = authorized_tx(user_id, unsigned_tx, FeePayerType::Evm);
 
         let evm_balance_before = evm_context
             .evm_state
@@ -2251,7 +2275,7 @@ mod test {
             input: vec![],
         };
 
-        let ix = crate::authorized_tx(user_id, unsigned_tx, FeePayerType::Native);
+        let ix = authorized_tx(user_id, unsigned_tx, FeePayerType::Native);
 
         let evm_balance_before = evm_context
             .evm_state
