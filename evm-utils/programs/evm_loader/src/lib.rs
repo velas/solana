@@ -270,7 +270,7 @@ pub fn evm_transfer(
     tx.sign(&from, chain_id)
 }
 
-// old instructions for emv bridge
+// old instructions for evm bridge
 
 pub fn send_raw_tx_old(
     signer: solana::Address,

@@ -12,7 +12,7 @@ use {
     serde::{Deserialize, Serialize},
     sha3::{Digest, Keccak256},
     snafu::ResultExt,
-    std::str::FromStr,
+    std::{convert::TryInto, str::FromStr},
 };
 
 pub type Address = H160;
@@ -606,7 +606,7 @@ impl TransactionReceipt {
 pub fn addr_from_public_key(key: &PublicKey) -> H160 {
     let digest = Keccak256::digest(&key.serialize_uncompressed()[1..]);
 
-    let hash = H256::from_slice(digest.as_slice());
+    let hash = H256(digest.try_into().unwrap());
     H160::from(hash)
 }
 
