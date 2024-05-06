@@ -158,6 +158,7 @@ pub enum EvmInstruction {
     /// tx - information about transaction execution:
     ///   who authorized and whether or not should we get transaction from account data storage
     /// fee_type - which side will be used for charging fee: Native or Evm
+    /// account_key[2] - `[writable]` - Optional Gas Collector
     ExecuteTransaction {
         tx: ExecuteTransaction,
         fee_type: FeePayerType,
