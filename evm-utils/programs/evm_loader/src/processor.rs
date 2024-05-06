@@ -44,8 +44,7 @@ impl EvmProcessor {
         data: &[u8],
         invoke_context: &mut InvokeContext,
     ) -> Result<(), InstructionError> {
-        let (evm_state_account, keyed_accounts) =
-            Self::check_evm_account(first_keyed_account, invoke_context)?;
+        let accounts = Self::build_account_structure(first_keyed_account, invoke_context)?;
 
         let cross_execution_enabled = invoke_context
             .feature_set
@@ -95,8 +94,6 @@ impl EvmProcessor {
             );
             return Err(EvmError::RecursiveCrossExecution.into());
         };
-
-        let accounts = AccountStructure::new(evm_state_account, keyed_accounts);
 
         let mut borsh_serialization_used = false;
         let ix = match (borsh_serialization_enabled, data.split_first()) {
@@ -712,10 +709,10 @@ impl EvmProcessor {
     }
 
     /// Ensure that first account is program itself, and it's locked for writes.
-    fn check_evm_account<'a>(
+    fn build_account_structure<'a>(
         first_keyed_account: usize,
         invoke_context: &'a InvokeContext,
-    ) -> Result<(&'a KeyedAccount<'a>, &'a [KeyedAccount<'a>]), InstructionError> {
+    ) -> Result<AccountStructure<'a>, InstructionError> {
         let keyed_accounts = invoke_context.get_keyed_accounts()?;
         let first = keyed_accounts
             .get(first_keyed_account)
@@ -723,13 +720,14 @@ impl EvmProcessor {
 
         trace!("first = {:?}", first);
         trace!("all = {:?}", keyed_accounts);
+
         if first.unsigned_key() != &solana::evm_state::id() || !first.is_writable() {
             debug!("First account is not evm, or not writable");
             return Err(InstructionError::MissingAccount);
         }
 
-        let keyed_accounts = &keyed_accounts[(first_keyed_account + 1)..];
-        Ok((first, keyed_accounts))
+        let users = &keyed_accounts[(first_keyed_account + 1)..];
+        Ok(AccountStructure::new(first, users))
     }
 }
 
