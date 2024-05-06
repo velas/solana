@@ -269,7 +269,7 @@ pub fn evm_address_for_program(program_account: solana::Address) -> evm::Address
     const ADDR_PREFIX: &[u8] = &[0xAC, 0xC0]; // ACC prefix for each account
 
     let addr_hash = Keccak256::digest(&program_account.to_bytes());
-    let hash_bytes = H256::from_slice(addr_hash.as_slice());
+    let hash_bytes = H256(addr_hash.try_into().unwrap());
     let mut short_hash = H160::from(hash_bytes);
     short_hash.as_bytes_mut()[0..2].copy_from_slice(ADDR_PREFIX);
 
