@@ -481,13 +481,13 @@ impl JsonRpcRequestProcessor {
         timestamp: Option<u64>,
     ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
         // TODO: block_hashes history
-        let arhive = self.evm_state_archive.clone()?;
+        let archive = self.evm_state_archive.clone()?;
         let bank = self.bank(Some(CommitmentConfig::processed()));
-        let state_ref = bank.evm_state.read().expect("state was poisoned");
+        let state_ref = bank.evm().main_chain().state();
         let timestamp = timestamp.unwrap_or(bank.clock().unix_timestamp as u64);
         match state_ref.new_from_parent(timestamp, true) {
             evm_state::EvmState::Incomming(mut i) => {
-                i.kvs = arhive;
+                i.kvs = archive;
                 Some(i)
             }
             _ => unreachable!(),

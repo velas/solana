@@ -54,7 +54,7 @@ impl StateRootWithBank {
 
         let root = *self.state_root.as_ref().unwrap();
         if let Some(bank) = &self.bank {
-            let evm = bank.evm_state.read().unwrap();
+            let evm = bank.evm().main_chain().state();
 
             assert!(evm.last_root() == root, "we store bank with invalid root");
             return Ok(evm.get_account_state(address));
@@ -84,7 +84,7 @@ impl StateRootWithBank {
 
         let root = *self.state_root.as_ref().unwrap();
         if let Some(bank) = &self.bank {
-            let evm = bank.evm_state.read().unwrap();
+            let evm = bank.evm().main_chain().state();
 
             assert!(evm.last_root() == root, "we store bank with invalid root");
             return Ok(evm.get_storage(address, idx));
@@ -114,7 +114,7 @@ async fn block_to_state_root(
     let block_num = match block_id {
         BlockId::RelativeId(BlockRelId::Pending) | BlockId::RelativeId(BlockRelId::Latest) => {
             let bank = meta.bank(Some(CommitmentConfig::processed()));
-            let evm = bank.evm_state.read().unwrap();
+            let evm = bank.evm().main_chain().state();
             let last_root = evm.last_root();
             drop(evm);
             return StateRootWithBank {
@@ -177,7 +177,7 @@ async fn block_parse_confirmed_num(
         BlockId::RelativeId(BlockRelId::Pending) | BlockId::RelativeId(BlockRelId::Latest) => {
             Some(meta.get_last_confirmed_evm_block().unwrap_or_else(|| {
                 let bank = meta.bank(Some(CommitmentConfig::processed()));
-                let evm = bank.evm_state.read().unwrap();
+                let evm = bank.evm().main_chain().state();
                 evm.block_number().saturating_sub(1)
             }))
         }
@@ -207,7 +207,7 @@ impl GeneralERPC for GeneralErpcImpl {
 
     fn network_id(&self, meta: Self::Metadata) -> Result<String, Error> {
         let bank = meta.bank(None);
-        Ok(format!("{}", bank.evm_chain_id))
+        Ok(format!("{}", bank.evm().main_chain().id()))
     }
 
     // TODO: Add network info
@@ -221,7 +221,7 @@ impl GeneralERPC for GeneralErpcImpl {
 
     fn chain_id(&self, meta: Self::Metadata) -> Result<Hex<u64>, Error> {
         let bank = meta.bank(None);
-        Ok(Hex(bank.evm_chain_id))
+        Ok(Hex(bank.evm().main_chain().id()))
     }
 
     fn protocol_version(&self, _meta: Self::Metadata) -> Result<String, Error> {
@@ -420,7 +420,7 @@ impl ChainERPC for ChainErpcImpl {
         tx_id: Hex<usize>,
     ) -> BoxFuture<Result<Option<RPCTransaction>, Error>> {
         let bank = meta.bank(None);
-        let chain_id = bank.evm_chain_id;
+        let chain_id = bank.evm().main_chain().id();
         Box::pin(async move {
             let (evm_block, _) = match meta.get_evm_block_id_by_hash(block_hash).await {
                 Some(num) => meta.get_evm_block_by_id(num).await,
@@ -449,7 +449,7 @@ impl ChainERPC for ChainErpcImpl {
         tx_id: Hex<usize>,
     ) -> BoxFuture<Result<Option<RPCTransaction>, Error>> {
         let bank = meta.bank(None);
-        let chain_id = bank.evm_chain_id;
+        let chain_id = bank.evm().main_chain().id();
         Box::pin(async move {
             let (evm_block, _) = match block_parse_confirmed_num(Some(block), &meta).await {
                 Some(num) => meta.get_evm_block_by_id(num).await,
@@ -687,7 +687,7 @@ impl TraceERPC for TraceErpcImpl {
                     let tx_traces = match meta.get_evm_block_by_id(tx_block).await {
                         Some((block, _)) => {
                             let block_hash = block.header.hash();
-                            let chain_id = meta.bank(None).evm_chain_id;
+                            let chain_id = meta.bank(None).evm().main_chain().id();
                             block
                                 .transactions
                                 .into_iter()
@@ -963,7 +963,7 @@ impl TraceERPC for TraceErpcImpl {
             evm_state.state.last_block_hash = block_header.parent_hash;
 
             let evm_config = evm_state::EvmConfig {
-                chain_id: meta.bank(None).evm_chain_id,
+                chain_id: meta.bank(None).evm().main_chain().id(),
                 estimate: false,
                 burn_gas_price: burn_gas_price.into(),
                 ..Default::default()
@@ -1077,7 +1077,7 @@ fn call_many(
 
     let evm_state = if use_latest_state {
         // keep current bank to allow simulating on latest state without archive
-        match bank.evm_state.read().unwrap().clone() {
+        match bank.evm().main_chain().state().clone() {
             evm_state::EvmState::Incomming(i) => i,
             evm_state::EvmState::Committed(c) => {
                 c.next_incomming(bank.clock().unix_timestamp as u64)
@@ -1095,7 +1095,7 @@ fn call_many(
 
     let estimate_config = evm_state::EvmConfig {
         estimate,
-        chain_id: bank.evm_chain_id,
+        chain_id: bank.evm().main_chain().id(),
         ..Default::default()
     };
 
@@ -1265,7 +1265,7 @@ async fn block_by_number(
     };
 
     let bank = meta.bank(None);
-    let chain_id = bank.evm_chain_id;
+    let chain_id = bank.evm().main_chain().id();
 
     let block_hash = block.header.hash();
     let transactions = if full {
@@ -1295,7 +1295,7 @@ async fn transaction_by_hash(
     tx_hash: H256,
 ) -> Result<Option<RPCTransaction>, Error> {
     let bank = meta.bank(None);
-    let chain_id = bank.evm_chain_id;
+    let chain_id = bank.evm().main_chain().id();
     Ok(match meta.get_evm_receipt_by_hash(tx_hash).await {
         Some(receipt) => {
             let (block, _) = meta

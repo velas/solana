@@ -300,8 +300,8 @@ mod tests {
             snapshot_version,
             None,
             Some(SnapshotType::FullSnapshot),
-            last_bank.evm_state.read().unwrap().last_root(),
-            last_bank.evm_state.read().unwrap().kvs().clone(),
+            last_bank.evm().main_chain().state().last_root(),
+            last_bank.evm().main_chain().state().kvs().clone(),
         )
         .unwrap();
         let snapshot_package = SnapshotPackage::from(accounts_package);

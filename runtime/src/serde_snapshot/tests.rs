@@ -233,9 +233,9 @@ fn test_bank_serialize_style(evm_version: EvmStateVersion) {
     // Create a directory to simulate evm backup
     let evm_copied_backup = TempDir::new().unwrap();
     bank2
-        .evm_state
-        .read()
-        .unwrap()
+        .evm()
+        .main_chain()
+        .state()
         .kvs()
         .backup(Some(evm_copied_backup.path().to_path_buf()))
         .unwrap();
@@ -360,9 +360,9 @@ fn test_blank_extra_fields() {
     let copied_accounts = TempDir::new().unwrap();
     let evm_path = TempDir::new().unwrap(); // Create a directory to simulate evm backup
     let evm_backup_path = TempDir::new().unwrap(); // Create a directory to simulate evm backup
-    bank.evm_state
-        .read()
-        .unwrap()
+    bank.evm()
+        .main_chain()
+        .state()
         .kvs()
         .backup(Some(evm_backup_path.path().to_path_buf()))
         .unwrap();

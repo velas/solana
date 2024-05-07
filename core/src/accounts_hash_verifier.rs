@@ -283,6 +283,7 @@ impl AccountsHashVerifier {
 mod tests {
     use solana_runtime::bank::Bank;
 
+    use evm_state::AccountProvider;
     use {
         super::*,
         solana_gossip::{cluster_info::make_accounts_hashes_message, contact_info::ContactInfo},
@@ -294,7 +295,6 @@ mod tests {
         },
         solana_streamer::socket::SocketAddrSpace,
     };
-    use evm_state::AccountProvider;
 
     fn new_test_cluster_info(contact_info: ContactInfo) -> ClusterInfo {
         ClusterInfo::new(
@@ -372,9 +372,9 @@ mod tests {
                 hash_for_testing: None,
                 cluster_type: ClusterType::MainnetBeta,
                 snapshot_type: None,
-                evm_db: bank.evm_state.read().unwrap().kvs().clone(),
-                evm_root: bank.evm_state.read().unwrap().last_root(),
-                bank: bank.clone()
+                evm_db: bank.evm().main_chain().state().kvs().clone(),
+                evm_root: bank.evm().main_chain().state().last_root(),
+                bank: bank.clone(),
             };
 
             let ledger_path = TempDir::new().unwrap();

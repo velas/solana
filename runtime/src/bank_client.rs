@@ -347,9 +347,9 @@ impl SyncClient for BankClient {
     fn get_evm_balance(&self, pubkey: &evm_state::Address) -> Result<evm_state::U256> {
         let account = self
             .bank
-            .evm_state
-            .read()
-            .unwrap()
+            .evm()
+            .main_chain()
+            .state()
             .get_account_state(*pubkey)
             .unwrap_or_default();
 

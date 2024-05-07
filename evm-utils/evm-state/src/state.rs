@@ -534,6 +534,7 @@ pub enum EvmPersistState {
     Committed(Committed),
     Incomming(Incomming), // Usually bank will never try to freeze banks with persist state.
 }
+
 impl EvmPersistState {
     pub fn last_root(&self) -> H256 {
         match self {
@@ -726,6 +727,7 @@ impl Default for Incomming {
         }
     }
 }
+
 impl Default for EvmBackend<Incomming> {
     fn default() -> Self {
         let kvs = KVS::create_temporary_gc().expect("Unable to create temporary storage");
@@ -762,6 +764,15 @@ impl From<EvmBackend<Incomming>> for EvmState {
 impl From<EvmBackend<Committed>> for EvmState {
     fn from(comm: EvmBackend<Committed>) -> EvmState {
         EvmState::Committed(comm)
+    }
+}
+
+impl From<EvmState> for EvmPersistState {
+    fn from(value: EvmState) -> Self {
+        match value {
+            EvmState::Committed(c) => c.state.into(),
+            EvmState::Incomming(i) => i.state.into(),
+        }
     }
 }
 

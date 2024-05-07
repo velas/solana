@@ -961,10 +961,12 @@ pub(crate) struct BankFieldsToDeserialize {
     pub(crate) stakes: Stakes,
     pub(crate) epoch_stakes: HashMap<Epoch, EpochStakes>,
     pub(crate) is_delta: bool,
-    pub(crate) evm_chain_id: u64,
+    pub(crate) accounts_data_len: u64,
+    // ANCHOR - VELAS
+    // TODO: put side chain details into snapshot
+    pub(crate) evm_chain_id: ChainID,
     pub(crate) evm_persist_fields: evm_state::EvmPersistState,
     pub(crate) evm_blockhashes: BlockHashEvm,
-    pub(crate) accounts_data_len: u64,
 }
 
 // Bank's common fields shared by all supported snapshot versions for serialization.
@@ -1003,12 +1005,16 @@ pub(crate) struct BankFieldsToSerialize<'a> {
     pub(crate) stakes: &'a StakesCache,
     pub(crate) epoch_stakes: &'a HashMap<Epoch, EpochStakes>,
     pub(crate) is_delta: bool,
+    pub(crate) accounts_data_len: u64,
+    // ANCHOR - VELAS
+    // TODO: put side chain details into snapshot
     pub(crate) evm_chain_id: u64,
     pub(crate) evm_persist_fields: evm_state::EvmPersistState,
     pub(crate) evm_blockhashes: &'a RwLock<BlockHashEvm>,
-    pub(crate) accounts_data_len: u64,
 }
 
+// ANCHOR - VELAS
+// TODO: Add side chain comparison
 // Can't derive PartialEq because RwLock doesn't implement PartialEq
 impl PartialEq for Bank {
     fn eq(&self, other: &Self) -> bool {
@@ -1045,9 +1051,7 @@ impl PartialEq for Bank {
             && *self.stakes_cache.stakes() == *other.stakes_cache.stakes()
             && self.epoch_stakes == other.epoch_stakes
             && self.is_delta.load(Relaxed) == other.is_delta.load(Relaxed)
-            && self.evm_chain_id == other.evm_chain_id
-            && self.evm_state.read().unwrap().last_root()
-                == other.evm_state.read().unwrap().last_root()
+            && self.evm == other.evm
     }
 }
 
@@ -1095,6 +1099,265 @@ impl AbiExample for BuiltinPrograms {
     }
 }
 
+/**========================================================================
+ **                            EVM SCOPE BEGIN
+ *========================================================================**/
+type ChainID = u64;
+
+#[derive(Debug, Default)]
+pub struct EvmChainState {
+    chain_id: ChainID,
+    evm_state: RwLock<evm_state::EvmState>,
+    evm_changed_list: RwLock<Option<(evm_state::H256, evm_state::ChangedState)>>,
+    evm_blockhashes: RwLock<BlockHashEvm>,
+}
+
+impl EvmChainState {
+    /// EVM Chain ID
+    pub fn id(&self) -> ChainID {
+        self.chain_id
+    }
+
+    /// EVM State read-only lock
+    pub fn state<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, evm_state::EvmState> {
+        // evm_state::EvmState
+        self.evm_state
+            .read()
+            .expect("EVM State RwLock was poisoned")
+    }
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct EvmBank {
+    // ANCHOR - VELAS
+    // TODO: private fields accessed via getters
+    main_chain: EvmChainState,
+    side_chains: HashMap<ChainID, EvmChainState>,
+}
+
+impl EvmBank {
+    pub fn new(
+        evm_chain_id: ChainID,
+        evm_blockhashes: BlockHashEvm,
+        evm_state: evm_state::EvmState,
+    ) -> Self {
+        Self {
+            main_chain: EvmChainState {
+                chain_id: evm_chain_id,
+                evm_state: RwLock::new(evm_state),
+                evm_changed_list: RwLock::new(None),
+                evm_blockhashes: RwLock::new(evm_blockhashes),
+            },
+            side_chains: Default::default(),
+        }
+    }
+
+    pub fn main_chain(&self) -> &EvmChainState {
+        &self.main_chain
+    }
+}
+
+impl Bank {
+    pub fn evm(&self) -> &EvmBank {
+        &self.evm
+    }
+
+    // TODO: Add chain id
+    pub fn take_evm_state_cloned(&self) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
+        let is_frozen = self.is_frozen();
+        let slot = self.slot();
+        match &*self
+            .evm
+            .main_chain
+            .evm_state
+            .read()
+            .expect("bank evm state was poisoned")
+        {
+            evm_state::EvmState::Incomming(i) => Some(i.clone()),
+            evm_state::EvmState::Committed(_) => {
+                warn!(
+                    "Take evm after freeze, bank_slot={}, bank_is_freeze={}",
+                    slot, is_frozen
+                );
+                // Return None, so this transaction will fail to execute,
+                // this transaction will be marked as retriable after bank realise that PoH is reached it's max height.
+                None
+            }
+        }
+    }
+
+    // TODO: Add chain id
+    pub fn take_evm_state_form_simulation(
+        &self,
+    ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
+        match &*self
+            .evm
+            .main_chain
+            .evm_state
+            .read()
+            .expect("bank evm state was poisoned")
+        {
+            evm_state::EvmState::Incomming(i) => Some(i.clone()),
+            evm_state::EvmState::Committed(c) => {
+                debug!("Creating cloned evm state for simulation");
+                Some(c.next_incomming(self.clock().unix_timestamp as u64))
+            }
+        }
+    }
+
+    pub fn evm_burn_fee_activated(&self) -> bool {
+        self.feature_set
+            .is_active(&feature_set::velas::burn_fee::id())
+    }
+
+    pub fn transfer_evm(
+        &self,
+        n: u64,
+        fee_payer: &Keypair,
+        keypair: &evm_state::SecretKey,
+        to: &evm_state::Address,
+    ) -> Result<Signature> {
+        let blockhash = self.last_blockhash();
+        let nonce = self
+            .evm
+            .main_chain
+            .evm_state
+            .read()
+            .unwrap()
+            .get_account_state(keypair.to_address())
+            .map(|s| s.nonce)
+            .unwrap_or_else(|| 0.into());
+        let evm_tx = solana_evm_loader_program::evm_transfer(
+            *keypair,
+            *to,
+            nonce,
+            n.into(),
+            Some(self.evm.main_chain.chain_id),
+        );
+        let ix = solana_evm_loader_program::send_raw_tx(
+            fee_payer.pubkey(),
+            evm_tx,
+            None,
+            solana_evm_loader_program::instructions::FeePayerType::Evm,
+        );
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&fee_payer.pubkey()),
+            &[fee_payer],
+            blockhash,
+        );
+        let signature = tx.signatures[0];
+        self.process_transaction(&tx).map(|_| signature)
+    }
+
+    pub fn commit_evm(&self) {
+        let mut measure = Measure::start("commit-evm-block-ms");
+
+        let old_root = self.evm.main_chain.evm_state.read().unwrap().last_root();
+        let hash = self
+            .evm
+            .main_chain
+            .evm_state
+            .write()
+            .expect("evm state was poisoned")
+            .try_commit(self.slot(), self.last_blockhash().to_bytes())
+            .expect("failed to commit evm");
+
+        measure.stop();
+        debug!("EVM state commit took {}", measure);
+
+        inc_new_counter_info!("commit-evm-block-ms", measure.as_ms() as usize);
+
+        debug!(
+            "Set evm state root to {:?} at block {}",
+            self.evm.main_chain.evm_state.read().unwrap().last_root(),
+            self.evm.main_chain.evm_state.read().unwrap().block_number()
+        );
+
+        let mut w_evm_blockhash_queue = self
+            .evm
+            .main_chain
+            .evm_blockhashes
+            .write()
+            .expect("evm blockchashes poisoned");
+
+        if let Some((hash, changes)) = hash {
+            *self
+                .evm
+                .main_chain
+                .evm_changed_list
+                .write()
+                .expect("change list was poisoned") = Some((old_root, changes));
+
+            self.evm
+                .main_chain
+                .evm_state
+                .write()
+                .expect("evm state was poisoned")
+                .reregister_slot(self.slot())
+                .expect("Failed to change slot");
+            w_evm_blockhash_queue.insert_hash(hash);
+            if self.fix_recent_blockhashes_sysvar_evm() {
+                self.update_recent_evm_blockhashes_locked(&w_evm_blockhash_queue);
+            }
+        }
+    }
+
+    pub fn evm_hashes(&self) -> [evm_state::H256; crate::blockhash_queue::MAX_EVM_BLOCKHASHES] {
+        *self
+            .evm
+            .main_chain
+            .evm_blockhashes
+            .read()
+            .expect("evm_blockhahes poisoned")
+            .get_hashes()
+    }
+
+    pub fn update_recent_blockhashes(&self) {
+        let blockhash_queue = self.blockhash_queue.read().unwrap();
+        let evm_blockhashes = self.evm.main_chain.evm_blockhashes.read().unwrap();
+        self.update_recent_blockhashes_locked(&blockhash_queue);
+        if !self.fix_recent_blockhashes_sysvar_evm() {
+            self.update_recent_evm_blockhashes_locked(&evm_blockhashes);
+        }
+    }
+
+    fn update_recent_evm_blockhashes_locked(&self, locked_blockhash_queue: &BlockHashEvm) {
+        self.update_sysvar_account(&sysvar::recent_evm_blockhashes::id(), |account| {
+            let mut hashes = [Hash::default(); crate::blockhash_queue::MAX_EVM_BLOCKHASHES];
+            for (i, hash) in locked_blockhash_queue.get_hashes().iter().enumerate() {
+                hashes[i] = Hash::new_from_array(*hash.as_fixed_bytes())
+            }
+            recent_evm_blockhashes_account::create_account_with_data_and_fields(
+                self.inherit_specially_retained_account_fields(account),
+                hashes,
+            )
+        });
+    }
+
+    fn fix_spv_proofs_evm(&self) -> bool {
+        self.feature_set
+            .is_active(&feature_set::velas::hardfork_pack::id())
+    }
+
+    fn fix_recent_blockhashes_sysvar_evm(&self) -> bool {
+        self.feature_set
+            .is_active(&feature_set::velas::hardfork_pack::id())
+    }
+}
+
+impl PartialEq for EvmChainState {
+    fn eq(&self, other: &Self) -> bool {
+        let last_root_self = self.evm_state.read().unwrap().last_root();
+        let last_root_other = other.evm_state.read().unwrap().last_root();
+
+        self.chain_id == other.chain_id && last_root_self == last_root_other
+    }
+}
+/**========================================================================
+ **                           EVM SCOPE END
+ *========================================================================**/
+
 /// Manager for the state of all accounts and programs after processing its entries.
 /// AbiExample is needed even without Serialize/Deserialize; actual (de-)serialization
 /// are implemented elsewhere for versioning
@@ -1108,14 +1371,11 @@ pub struct Bank {
     /// FIFO queue of `recent_blockhash` items
     blockhash_queue: RwLock<BlockhashQueue>,
 
-    evm_blockhashes: RwLock<BlockHashEvm>,
-
     /// The set of parents including this bank
     pub ancestors: Ancestors,
 
-    pub evm_chain_id: u64,
-    pub evm_state: RwLock<evm_state::EvmState>,
-    pub evm_changed_list: RwLock<Option<(evm_state::H256, evm_state::ChangedState)>>,
+    /// Velas EVM Bank
+    evm: EvmBank,
 
     /// Hash of this Bank's state. Only meaningful after freezing.
     hash: RwLock<Hash>,
@@ -1417,10 +1677,9 @@ impl Bank {
             accounts_data_size_delta_on_chain: AtomicI64::new(0),
             accounts_data_size_delta_off_chain: AtomicI64::new(0),
             fee_structure: FeeStructure::default(),
-            evm_blockhashes: Default::default(),
-            evm_chain_id: Default::default(),
-            evm_state: RwLock::new(evm_state),
-            evm_changed_list: Default::default(),
+            // ANCHOR - VELAS
+            // TODO: put evm_state argument into
+            evm: Default::default(),
         };
 
         let accounts_data_size_initial = bank.get_total_accounts_stats().unwrap().data_len as u64;
@@ -1520,7 +1779,7 @@ impl Bank {
         bank.ancestors = Ancestors::from(vec![bank.slot()]);
         bank.transaction_debug_keys = debug_keys;
         bank.cluster_type = Some(genesis_config.cluster_type);
-        bank.evm_chain_id = genesis_config.evm_chain_id;
+        bank.evm.main_chain.chain_id = genesis_config.evm_chain_id;
 
         bank.process_genesis_config(genesis_config);
         bank.finish_init(
@@ -1649,6 +1908,8 @@ impl Bank {
                 let spv_compatibility = parent.fix_spv_proofs_evm();
 
                 let mut evm_state = parent
+                    .evm
+                    .main_chain
                     .evm_state
                     .read()
                     .expect("parent evm state was poisoned")
@@ -1728,10 +1989,18 @@ impl Bank {
             epoch,
             blockhash_queue,
 
-            evm_blockhashes: RwLock::new(parent.evm_blockhashes.read().unwrap().clone()),
-            evm_chain_id: parent.evm_chain_id,
-            evm_state: RwLock::new(evm_state),
-            evm_changed_list: RwLock::new(None),
+            evm: EvmBank::new(
+                parent.evm.main_chain.chain_id,
+                parent
+                    .evm
+                    .main_chain
+                    .evm_blockhashes
+                    .read()
+                    .unwrap()
+                    .clone(),
+                evm_state,
+            ),
+
             // TODO: clean this up, so much special-case copying...
             hashes_per_tick: parent.hashes_per_tick,
             ticks_per_slot: parent.ticks_per_slot,
@@ -2055,10 +2324,9 @@ impl Bank {
             rc: bank_rc,
             src: new(),
             blockhash_queue: RwLock::new(fields.blockhash_queue),
-            evm_blockhashes: RwLock::new(fields.evm_blockhashes),
-            evm_chain_id: fields.evm_chain_id,
-            evm_state: RwLock::new(evm_state),
-            evm_changed_list: RwLock::new(None),
+            // ANCHOR - VELAS
+            // TODO: deserialize chain details from snapshot
+            evm: EvmBank::new(fields.evm_chain_id, fields.evm_blockhashes, evm_state),
             ancestors: Ancestors::from(&fields.ancestors),
             hash: RwLock::new(fields.hash),
             parent_hash: fields.parent_hash,
@@ -2179,9 +2447,16 @@ impl Bank {
     ) -> BankFieldsToSerialize<'a> {
         BankFieldsToSerialize {
             blockhash_queue: &self.blockhash_queue,
-            evm_blockhashes: &self.evm_blockhashes,
-            evm_chain_id: self.evm_chain_id,
-            evm_persist_fields: self.evm_state.read().unwrap().clone().save_state(),
+            evm_blockhashes: &self.evm.main_chain.evm_blockhashes,
+            evm_chain_id: self.evm.main_chain.chain_id,
+            evm_persist_fields: self
+                .evm
+                .main_chain
+                .evm_state
+                .read()
+                .unwrap()
+                .clone()
+                .save_state(),
             ancestors,
             hash: *self.hash.read().unwrap(),
             parent_hash: self.parent_hash,
@@ -2216,11 +2491,13 @@ impl Bank {
     }
 
     pub fn evm_block(&self) -> Option<evm_state::Block> {
-        self.evm_state.read().unwrap().get_block()
+        self.evm.main_chain.evm_state.read().unwrap().get_block()
     }
 
     pub fn evm_state_change(&self) -> Option<(evm_state::H256, evm_state::ChangedState)> {
-        self.evm_changed_list
+        self.evm
+            .main_chain
+            .evm_changed_list
             .read()
             .expect("change list was poisoned")
             .clone()
@@ -3004,28 +3281,6 @@ impl Bank {
         });
     }
 
-    fn update_recent_evm_blockhashes_locked(&self, locked_blockhash_queue: &BlockHashEvm) {
-        self.update_sysvar_account(&sysvar::recent_evm_blockhashes::id(), |account| {
-            let mut hashes = [Hash::default(); crate::blockhash_queue::MAX_EVM_BLOCKHASHES];
-            for (i, hash) in locked_blockhash_queue.get_hashes().iter().enumerate() {
-                hashes[i] = Hash::new_from_array(*hash.as_fixed_bytes())
-            }
-            recent_evm_blockhashes_account::create_account_with_data_and_fields(
-                self.inherit_specially_retained_account_fields(account),
-                hashes,
-            )
-        });
-    }
-
-    pub fn update_recent_blockhashes(&self) {
-        let blockhash_queue = self.blockhash_queue.read().unwrap();
-        let evm_blockhashes = self.evm_blockhashes.read().unwrap();
-        self.update_recent_blockhashes_locked(&blockhash_queue);
-        if !self.fix_recent_blockhashes_sysvar_evm() {
-            self.update_recent_evm_blockhashes_locked(&evm_blockhashes);
-        }
-    }
-
     fn get_timestamp_estimate(
         &self,
         max_allowable_drift: MaxAllowableDrift,
@@ -3122,51 +3377,6 @@ impl Bank {
                 }
             }
             self.capitalization.fetch_sub(burn, Relaxed);
-        }
-    }
-
-    pub fn commit_evm(&self) {
-        let mut measure = Measure::start("commit-evm-block-ms");
-
-        let old_root = self.evm_state.read().unwrap().last_root();
-        let hash = self
-            .evm_state
-            .write()
-            .expect("evm state was poisoned")
-            .try_commit(self.slot(), self.last_blockhash().to_bytes())
-            .expect("failed to commit evm");
-
-        measure.stop();
-        debug!("EVM state commit took {}", measure);
-
-        inc_new_counter_info!("commit-evm-block-ms", measure.as_ms() as usize);
-
-        debug!(
-            "Set evm state root to {:?} at block {}",
-            self.evm_state.read().unwrap().last_root(),
-            self.evm_state.read().unwrap().block_number()
-        );
-
-        let mut w_evm_blockhash_queue = self
-            .evm_blockhashes
-            .write()
-            .expect("evm blockchashes poisoned");
-
-        if let Some((hash, changes)) = hash {
-            *self
-                .evm_changed_list
-                .write()
-                .expect("change list was poisoned") = Some((old_root, changes));
-
-            self.evm_state
-                .write()
-                .expect("evm state was poisoned")
-                .reregister_slot(self.slot())
-                .expect("Failed to change slot");
-            w_evm_blockhash_queue.insert_hash(hash);
-            if self.fix_recent_blockhashes_sysvar_evm() {
-                self.update_recent_evm_blockhashes_locked(&w_evm_blockhash_queue);
-            }
         }
     }
 
@@ -3366,6 +3576,8 @@ impl Bank {
             &solana_sdk::evm_loader::id(),
             &evm_executor_account,
         );
+        // ANCHOR - VELAS
+        // FIXME: code dup: solana_evm_loader_program::create_state_account
         let evm_state = Account {
             lamports: 1,
             owner: solana_sdk::evm_loader::id(),
@@ -3690,11 +3902,6 @@ impl Bank {
         }
     }
 
-    pub fn evm_burn_fee_activated(&self) -> bool {
-        self.feature_set
-            .is_active(&feature_set::velas::burn_fee::id())
-    }
-
     /// Prepare a transaction batch from a list of legacy transactions. Used for tests only.
     pub fn prepare_batch_for_tests(&self, txs: Vec<Transaction>) -> TransactionBatch {
         let sanitized_txs = txs
@@ -3775,36 +3982,6 @@ impl Bank {
             TransactionBatch::new(vec![lock_result], self, Cow::Owned(vec![transaction]));
         batch.set_needs_unlock(false);
         batch
-    }
-
-    pub fn take_evm_state_cloned(&self) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
-        let is_frozen = self.is_frozen();
-        let slot = self.slot();
-        match &*self.evm_state.read().expect("bank evm state was poisoned") {
-            evm_state::EvmState::Incomming(i) => Some(i.clone()),
-            evm_state::EvmState::Committed(_) => {
-                warn!(
-                    "Take evm after freeze, bank_slot={}, bank_is_freeze={}",
-                    slot, is_frozen
-                );
-                None // Return None, so this transaction will fail to execute,
-                     // this transaction will be marked as retriable after bank realise that PoH is reached it's max height.
-            }
-        }
-    }
-
-    pub fn take_evm_state_form_simulation(
-        &self,
-    ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
-        Some(
-            match &*self.evm_state.read().expect("bank evm state was poisoned") {
-                evm_state::EvmState::Incomming(i) => i.clone(),
-                evm_state::EvmState::Committed(c) => {
-                    debug!("Creating cloned evm state for simulation");
-                    c.next_incomming(self.clock().unix_timestamp as u64)
-                }
-            },
-        )
     }
 
     /// Run transactions against a frozen bank without committing the results
@@ -4164,6 +4341,8 @@ impl Bank {
         timings: &mut ExecuteTimings,
         error_counters: &mut TransactionErrorMetrics,
         evm_patch: &mut Option<evm_state::EvmBackend<evm_state::Incomming>>,
+        // ANCHOR - VELAS
+        // TODO: Add chain id
         evm_state_getter: impl Fn(&Self) -> Option<evm_state::EvmBackend<evm_state::Incomming>>,
     ) -> TransactionExecutionResult {
         let mut get_executors_time = Measure::start("get_executors_time");
@@ -4202,7 +4381,7 @@ impl Bank {
                 let evm_executor = evm_state::Executor::with_config(
                     state.clone(),
                     evm_state::ChainContext::new(last_hashes),
-                    evm_state::EvmConfig::new(self.evm_chain_id, self.evm_burn_fee_activated()),
+                    evm_state::EvmConfig::new(self.evm().main_chain().id(), self.evm_burn_fee_activated()),
                     evm_state::executor::FeatureSet::new(
                         self.feature_set
                             .is_active(&solana_sdk::feature_set::velas::unsigned_tx_fix::id()),
@@ -4349,14 +4528,6 @@ impl Bank {
         }
     }
 
-    pub fn evm_hashes(&self) -> [evm_state::H256; crate::blockhash_queue::MAX_EVM_BLOCKHASHES] {
-        *self
-            .evm_blockhashes
-            .read()
-            .expect("evm_blockhahes poisoned")
-            .get_hashes()
-    }
-
     #[allow(clippy::type_complexity)]
     pub fn load_and_execute_transactions(
         &self,
@@ -4366,6 +4537,8 @@ impl Bank {
         enable_log_recording: bool,
         timings: &mut ExecuteTimings,
         account_overrides: Option<&AccountOverrides>,
+        // ANCHOR - VELAS
+        // TODO: Add chain id
         evm_state_getter: impl Fn(&Self) -> Option<evm_state::EvmBackend<evm_state::Incomming>> + Clone,
     ) -> LoadAndExecuteTransactionsOutput {
         let sanitized_txs = batch.sanitized_transactions();
@@ -4919,7 +5092,12 @@ impl Bank {
         update_stakes_cache_time.stop();
 
         if let Some(patch) = evm_patch {
-            let mut evm_state = self.evm_state.write().expect("bank evm state was poisoned");
+            let mut evm_state = self
+                .evm
+                .main_chain
+                .evm_state
+                .write()
+                .expect("bank evm state was poisoned");
             trace!("Updating evm state, before = {:?}", *evm_state);
             trace!("Updating evm state, after = {:?}", patch);
             *evm_state = patch.into()
@@ -5472,16 +5650,6 @@ impl Bank {
         partitions
     }
 
-    fn fix_spv_proofs_evm(&self) -> bool {
-        self.feature_set
-            .is_active(&feature_set::velas::hardfork_pack::id())
-    }
-
-    fn fix_recent_blockhashes_sysvar_evm(&self) -> bool {
-        self.feature_set
-            .is_active(&feature_set::velas::hardfork_pack::id())
-    }
-
     fn fixed_cycle_partitions(&self) -> Vec<Partition> {
         let slot_count_in_two_day = self.slot_count_in_two_day();
         Self::get_partitions(self.slot(), self.parent_slot(), slot_count_in_two_day)
@@ -5890,44 +6058,6 @@ impl Bank {
         self.process_transaction(&tx).map(|_| signature)
     }
 
-    pub fn transfer_evm(
-        &self,
-        n: u64,
-        fee_payer: &Keypair,
-        keypair: &evm_state::SecretKey,
-        to: &evm_state::Address,
-    ) -> Result<Signature> {
-        let blockhash = self.last_blockhash();
-        let nonce = self
-            .evm_state
-            .read()
-            .unwrap()
-            .get_account_state(keypair.to_address())
-            .map(|s| s.nonce)
-            .unwrap_or_else(|| 0.into());
-        let evm_tx = solana_evm_loader_program::evm_transfer(
-            *keypair,
-            *to,
-            nonce,
-            n.into(),
-            Some(self.evm_chain_id),
-        );
-        let ix = solana_evm_loader_program::send_raw_tx(
-            fee_payer.pubkey(),
-            evm_tx,
-            None,
-            solana_evm_loader_program::instructions::FeePayerType::Evm,
-        );
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&fee_payer.pubkey()),
-            &[fee_payer],
-            blockhash,
-        );
-        let signature = tx.signatures[0];
-        self.process_transaction(&tx).map(|_| signature)
-    }
-
     pub fn read_balance(account: &AccountSharedData) -> u64 {
         account.lamports()
     }
@@ -6118,7 +6248,9 @@ impl Bank {
 
         self.builtin_feature_transitions = Arc::new(builtins.feature_transitions);
 
-        self.evm_state
+        self.evm
+            .main_chain
+            .evm_state
             .write()
             .expect("poisoned state")
             .reregister_slot(self.slot())
@@ -6367,6 +6499,8 @@ impl Bank {
         LittleEndian::write_u64(&mut signature_count_buf[..], self.signature_count());
 
         let evm_state_root = self
+            .evm
+            .main_chain
             .evm_state
             .read()
             .expect("EVM state poisoned")
@@ -7355,7 +7489,7 @@ impl Drop for Bank {
                 true, // TODO: Check if bug from previos solana persist
             );
 
-            let evm_state = self.evm_state.read().unwrap();
+            let evm_state = self.evm.main_chain.evm_state.read().unwrap();
             let storage = evm_state.kvs();
             let slot = self.slot();
             let handle_evm_error = move || -> evm_state::storage::Result<()> {
@@ -7384,6 +7518,9 @@ pub fn goto_end_of_slot(bank: &mut Bank) {
         }
     }
 }
+
+// ANCHOR - VELAS
+// TODO: Extract EVM related tests into separate scope
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -10858,9 +10995,9 @@ pub(crate) mod tests {
                 });
             });
 
-            let hash_before = bank.evm_state.read().unwrap().last_root();
+            let hash_before = bank.evm.main_chain.evm_state.read().unwrap().last_root();
             bank.freeze();
-            let hash_after = bank.evm_state.read().unwrap().last_root();
+            let hash_after = bank.evm.main_chain.evm_state.read().unwrap().last_root();
             (hash_before, hash_after)
         }
 
@@ -10919,6 +11056,8 @@ pub(crate) mod tests {
         let bank = Bank::new_from_parent(&bank, &Pubkey::default(), 1);
 
         let state = bank
+            .evm
+            .main_chain
             .evm_state
             .read()
             .unwrap()
@@ -10929,13 +11068,15 @@ pub(crate) mod tests {
         let tx = evm_call(&mint_keypair, recent_hash, 0);
         let _res = bank.process_transaction(&tx).unwrap();
 
-        let hash_before = bank.evm_state.read().unwrap().last_root();
+        let hash_before = bank.evm.main_chain.evm_state.read().unwrap().last_root();
         bank.freeze();
-        let hash_after = bank.evm_state.read().unwrap().last_root();
+        let hash_after = bank.evm.main_chain.evm_state.read().unwrap().last_root();
 
         assert_ne!(hash_before, hash_after); // nonce increased in old version
 
         let state = bank
+            .evm
+            .main_chain
             .evm_state
             .read()
             .unwrap()
@@ -10943,13 +11084,23 @@ pub(crate) mod tests {
             .unwrap_or_default();
         assert_eq!(state.nonce, 1.into());
 
-        assert_eq!(bank.evm_state.read().unwrap().processed_tx_len(), 1);
+        assert_eq!(
+            bank.evm
+                .main_chain
+                .evm_state
+                .read()
+                .unwrap()
+                .processed_tx_len(),
+            1
+        );
 
         // Second try same tx
         let bank = Arc::new(bank);
         let bank = Bank::new_from_parent(&bank, &Pubkey::default(), 2);
 
         let state = bank
+            .evm
+            .main_chain
             .evm_state
             .read()
             .unwrap()
@@ -10959,15 +11110,25 @@ pub(crate) mod tests {
         let tx = evm_call(&mint_keypair, recent_hash, 0); // send tx with same nonce
         let _res = bank.process_transaction(&tx).unwrap_err(); // execution should fail
 
-        let hash_before = bank.evm_state.read().unwrap().last_root();
+        let hash_before = bank.evm.main_chain.evm_state.read().unwrap().last_root();
         bank.freeze();
-        let hash_after = bank.evm_state.read().unwrap().last_root();
+        let hash_after = bank.evm.main_chain.evm_state.read().unwrap().last_root();
 
         assert_eq!(hash_before, hash_after); // nonce increased in old version
 
-        assert_eq!(bank.evm_state.read().unwrap().processed_tx_len(), 0);
+        assert_eq!(
+            bank.evm
+                .main_chain
+                .evm_state
+                .read()
+                .unwrap()
+                .processed_tx_len(),
+            0
+        );
 
         let state = bank
+            .evm
+            .main_chain
             .evm_state
             .read()
             .unwrap()
@@ -11013,10 +11174,10 @@ pub(crate) mod tests {
 
         res.unwrap_err();
 
-        let hash_before = bank.evm_state.read().unwrap().last_root();
+        let hash_before = bank.evm.main_chain.evm_state.read().unwrap().last_root();
         bank.freeze();
 
-        let evm_state = bank.evm_state.read().unwrap();
+        let evm_state = bank.evm.main_chain.evm_state.read().unwrap();
         let hash_after = evm_state.last_root();
 
         // check that revert keep tx in history, but balances are set to zero
@@ -11080,10 +11241,10 @@ pub(crate) mod tests {
 
         res.unwrap_err();
 
-        let hash_before = bank.evm_state.read().unwrap().last_root();
+        let hash_before = bank.evm.main_chain.evm_state.read().unwrap().last_root();
         bank.freeze();
 
-        let evm_state = bank.evm_state.read().unwrap();
+        let evm_state = bank.evm.main_chain.evm_state.read().unwrap();
         let hash_after = evm_state.last_root();
 
         // check that revert keep tx in history, but balances are set to zero
@@ -11136,10 +11297,10 @@ pub(crate) mod tests {
 
         res.unwrap();
 
-        let hash_before = bank.evm_state.read().unwrap().last_root();
+        let hash_before = bank.evm.main_chain.evm_state.read().unwrap().last_root();
         bank.freeze();
 
-        let evm_state = bank.evm_state.read().unwrap();
+        let evm_state = bank.evm.main_chain.evm_state.read().unwrap();
         let hash_after = evm_state.last_root();
 
         // check that revert keep tx in history, but balances are set to zero
@@ -11173,7 +11334,7 @@ pub(crate) mod tests {
         let init_balance = 10000000.into();
         {
             // force changing evm_state account
-            let mut evm_state = bank0.evm_state.write().unwrap();
+            let mut evm_state = bank0.evm.main_chain.evm_state.write().unwrap();
             match &mut *evm_state {
                 evm_state::EvmState::Incomming(i) => {
                     i.set_initial(vec![(
@@ -11193,7 +11354,7 @@ pub(crate) mod tests {
         }
         let pubkey: evm_state::H160 = H256::random().into();
         {
-            let evm_state = bank0.evm_state.read().unwrap();
+            let evm_state = bank0.evm.main_chain.evm_state.read().unwrap();
             assert_eq!(
                 evm_state.get_account_state(sender_addr).unwrap().balance,
                 init_balance
@@ -11211,7 +11372,7 @@ pub(crate) mod tests {
         let bank2 = Bank::new_from_parent(&bank0, &solana_sdk::pubkey::new_rand(), 1);
 
         {
-            let evm_state = bank2.evm_state.read().unwrap();
+            let evm_state = bank2.evm.main_chain.evm_state.read().unwrap();
             assert_eq!(
                 evm_state.get_account_state(sender_addr).unwrap().balance,
                 init_balance - 21000 - 1000
@@ -11241,7 +11402,7 @@ pub(crate) mod tests {
         assert!(bank3.verify_bank_hash(true, false));
         drop(bank0);
         drop(bank2);
-        let evm_state = bank3.evm_state.read().unwrap();
+        let evm_state = bank3.evm.main_chain.evm_state.read().unwrap();
         assert_eq!(
             evm_state.get_account_state(sender_addr).unwrap().balance,
             init_balance - 21000 - 1000
@@ -11261,7 +11422,7 @@ pub(crate) mod tests {
         let init_balance = 10000000.into();
         {
             // force changing evm_state account
-            let mut evm_state = bank0.evm_state.write().unwrap();
+            let mut evm_state = bank0.evm.main_chain.evm_state.write().unwrap();
             match &mut *evm_state {
                 evm_state::EvmState::Incomming(i) => {
                     i.set_initial(vec![(
@@ -11281,7 +11442,7 @@ pub(crate) mod tests {
         }
         let pubkey: evm_state::H160 = H256::random().into();
         {
-            let evm_state = bank0.evm_state.read().unwrap();
+            let evm_state = bank0.evm.main_chain.evm_state.read().unwrap();
             assert_eq!(
                 evm_state.get_account_state(sender_addr).unwrap().balance,
                 init_balance
@@ -11298,13 +11459,13 @@ pub(crate) mod tests {
 
         drop(bank0);
         {
-            let evm_state = bank2.evm_state.read().unwrap();
+            let evm_state = bank2.evm.main_chain.evm_state.read().unwrap();
             assert_eq!(
                 evm_state.get_account_state(sender_addr).unwrap().balance,
                 init_balance - 21000 - 1000
             );
         }
-        let evm_state = bank2.evm_state.read().unwrap().clone();
+        let evm_state = bank2.evm.main_chain.evm_state.read().unwrap().clone();
         {
             assert_eq!(
                 evm_state.get_account_state(sender_addr).unwrap().balance,

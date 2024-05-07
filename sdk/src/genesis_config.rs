@@ -104,9 +104,9 @@ pub struct GenesisConfig {
     pub epoch_schedule: EpochSchedule,
     /// network runlevel
     pub cluster_type: ClusterType,
-    /// Initial data for evm part
+    /// main chain EVM root hash
     pub evm_root_hash: H256,
-    /// EVM chain id
+    /// EVM main chain id
     pub evm_chain_id: u64,
 }
 

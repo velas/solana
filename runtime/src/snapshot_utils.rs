@@ -1928,7 +1928,7 @@ pub fn snapshot_bank(
     inc_new_counter_info!("add-snapshot-ms", add_snapshot_time.as_ms() as usize);
 
     let (evm_root, evm_database) = {
-        let evm_state = root_bank.evm_state.read().unwrap();
+        let evm_state = root_bank.evm().main_chain().state();
         (evm_state.last_root(), evm_state.kvs().clone())
     };
 
@@ -2096,7 +2096,7 @@ pub fn package_and_archive_full_snapshot(
     maximum_incremental_snapshot_archives_to_retain: usize,
 ) -> Result<FullSnapshotArchiveInfo> {
     let (evm_root, evm_database) = {
-        let evm_state = bank.evm_state.read().unwrap();
+        let evm_state = bank.evm().main_chain().state();
         (evm_state.last_root(), evm_state.kvs().clone())
     };
     let deltas = bank.src.slot_deltas(&bank.src.roots());
@@ -2143,7 +2143,7 @@ pub fn package_and_archive_incremental_snapshot(
     maximum_incremental_snapshot_archives_to_retain: usize,
 ) -> Result<IncrementalSnapshotArchiveInfo> {
     let (evm_root, evm_database) = {
-        let evm_state = bank.evm_state.read().unwrap();
+        let evm_state = bank.evm().main_chain().state();
         (evm_state.last_root(), evm_state.kvs().clone())
     };
     let deltas = bank.src.slot_deltas(&bank.src.roots());

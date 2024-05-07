@@ -348,7 +348,7 @@ impl AbsRequestHandler {
                 .accounts
                 .purge_slot(pruned_slot, pruned_bank_id, is_from_abs);
 
-            let evm_state = bank.evm_state.read().unwrap();
+            let evm_state = bank.evm().main_chain().state();
             let storage = evm_state.kvs();
             let handle_evm_error = move || -> evm_state::storage::Result<()> {
                 if let Some(h) = storage.purge_slot(pruned_slot)? {

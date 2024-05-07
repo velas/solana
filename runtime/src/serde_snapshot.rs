@@ -291,7 +291,7 @@ pub(crate) fn bank_to_stream<W>(
 where
     W: Write,
 {
-    let gc_enabled = bank.evm_state.read().unwrap().kvs().gc_enabled();
+    let gc_enabled = bank.evm().main_chain().state().kvs().gc_enabled();
     if evm_version.support_gc() != gc_enabled {
         return Err(Error::custom(format!(
             "Snapshot gc config is different from config in storage storage_gc={}, version={:?}",
