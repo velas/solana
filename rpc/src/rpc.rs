@@ -347,7 +347,7 @@ impl JsonRpcRequestProcessor {
     }
 
     pub fn get_main_chain_id(&self) -> u64 {
-        self.bank(None).evm_chain_id
+        self.bank(None).evm().main_chain().id()
     }
 
     fn genesis_creation_time(&self) -> UnixTimestamp {
