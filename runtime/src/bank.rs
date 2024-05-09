@@ -4355,17 +4355,18 @@ impl Bank {
         };
 
         let mut evm_create_executor = Measure::start("evm_create_executor");
+        // ANCHOR - VELAS
         // Create evm_executor only if evm_state account is locked.
         // Executor can be used to execute multiple transactions, but currently executor only created for single tx.
-        let evm_executor = if tx.message().is_modify_evm_state() {
+        let evm_executor /* (chain_id) */ = if tx.message().is_modify_evm_state() {
             // append to old patch if exist, or create new, from existing evm state
-            *evm_patch = evm_patch.take().or_else(|| evm_state_getter(self));
-            let last_hashes = self.evm_hashes();
+            *evm_patch = evm_patch.take().or_else(|| evm_state_getter(self /*chain_id */));
+            let last_hashes = self.evm_hashes(/*chain_id */);
             if let Some(state) = &evm_patch {
                 let evm_executor = evm_state::Executor::with_config(
                     state.clone(),
                     evm_state::ChainContext::new(last_hashes),
-                    evm_state::EvmConfig::new(self.evm().main_chain().id(), self.evm_burn_fee_activated()),
+                    evm_state::EvmConfig::new( /*chain_id */ self.evm().main_chain().id(), self.evm_burn_fee_activated()),
                     evm_state::executor::FeatureSet::new(
                         self.feature_set
                             .is_active(&solana_sdk::feature_set::velas::unsigned_tx_fix::id()),
@@ -7460,30 +7461,25 @@ pub struct TotalAccountsStats {
 
 impl Drop for Bank {
     fn drop(&mut self) {
+        use evm_state::{storage, Storage};
+        fn handle_evm_error(storage: &Storage, slot: u64) -> storage::Result<()> {
+            if let Some(h) = storage.purge_slot(slot)? {
+                let mut cleaner = evm_state::storage::RootCleanup::new(storage, vec![h]);
+                cleaner.cleanup()?
+            }
+            Ok(())
+        }
+
         if let Some(drop_callback) = self.drop_callback.read().unwrap().0.as_ref() {
             drop_callback.callback(self);
         } else {
-            // Default case
-            // 1. Tests
-            // 2. At startup when replaying blockstore and there's no
-            // AccountsBackgroundService to perform cleanups yet.
-            self.rc.accounts.purge_slot(
-                self.slot(),
-                self.bank_id(),
-                true, // TODO: Check if bug from previos solana persist
-            );
+            // Default case for tests
+            // TODO: Check if bug from previos solana persist
+            self.rc
+                .accounts
+                .purge_slot(self.slot(), self.bank_id(), true);
 
-            let evm_state = self.evm.main_chain.evm_state.read().unwrap();
-            let storage = evm_state.kvs();
-            let slot = self.slot();
-            let handle_evm_error = move || -> evm_state::storage::Result<()> {
-                if let Some(h) = storage.purge_slot(slot)? {
-                    let mut cleaner = evm_state::storage::RootCleanup::new(storage, vec![h]);
-                    cleaner.cleanup()?
-                }
-                Ok(())
-            };
-            if let Err(e) = handle_evm_error() {
+            if let Err(e) = handle_evm_error(self.evm().main_chain().state().kvs(), self.slot()) {
                 error!("Cannot purge evm_state slot: {}, error: {}", self.slot(), e)
                 //TODO: Save last hashes list, to perform cleanup if it was recoverable error.
             }

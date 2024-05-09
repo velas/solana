@@ -215,6 +215,8 @@ pub struct InvokeContext<'a> {
     pub timings: ExecuteDetailsTimings,
     pub blockhash: Hash,
     pub lamports_per_signature: u64,
+    // ANCHOR - VELAS
+    // &mut instead of Rc<RefCell<>>
     evm_executor: Option<Rc<RefCell<evm_state::Executor>>>,
 }
 
