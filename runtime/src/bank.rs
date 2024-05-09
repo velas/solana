@@ -961,12 +961,12 @@ pub(crate) struct BankFieldsToDeserialize {
     pub(crate) stakes: Stakes,
     pub(crate) epoch_stakes: HashMap<Epoch, EpochStakes>,
     pub(crate) is_delta: bool,
-    pub(crate) accounts_data_len: u64,
     // ANCHOR - VELAS
     // TODO: put side chain details into snapshot
     pub(crate) evm_chain_id: ChainID,
     pub(crate) evm_persist_fields: evm_state::EvmPersistState,
     pub(crate) evm_blockhashes: BlockHashEvm,
+    pub(crate) accounts_data_len: u64,
 }
 
 // Bank's common fields shared by all supported snapshot versions for serialization.
@@ -1005,12 +1005,12 @@ pub(crate) struct BankFieldsToSerialize<'a> {
     pub(crate) stakes: &'a StakesCache,
     pub(crate) epoch_stakes: &'a HashMap<Epoch, EpochStakes>,
     pub(crate) is_delta: bool,
-    pub(crate) accounts_data_len: u64,
     // ANCHOR - VELAS
     // TODO: put side chain details into snapshot
     pub(crate) evm_chain_id: u64,
     pub(crate) evm_persist_fields: evm_state::EvmPersistState,
     pub(crate) evm_blockhashes: &'a RwLock<BlockHashEvm>,
+    pub(crate) accounts_data_len: u64,
 }
 
 // ANCHOR - VELAS
@@ -1105,14 +1105,14 @@ impl AbiExample for BuiltinPrograms {
 type ChainID = u64;
 
 #[derive(Debug, Default)]
-pub struct EvmChainState {
+pub struct EvmChain {
     chain_id: ChainID,
     evm_state: RwLock<evm_state::EvmState>,
     evm_changed_list: RwLock<Option<(evm_state::H256, evm_state::ChangedState)>>,
     evm_blockhashes: RwLock<BlockHashEvm>,
 }
 
-impl EvmChainState {
+impl EvmChain {
     /// EVM Chain ID
     pub fn id(&self) -> ChainID {
         self.chain_id
@@ -1129,10 +1129,8 @@ impl EvmChainState {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct EvmBank {
-    // ANCHOR - VELAS
-    // TODO: private fields accessed via getters
-    main_chain: EvmChainState,
-    side_chains: HashMap<ChainID, EvmChainState>,
+    main_chain: EvmChain,
+    side_chains: HashMap<ChainID, EvmChain>,
 }
 
 impl EvmBank {
@@ -1142,7 +1140,7 @@ impl EvmBank {
         evm_state: evm_state::EvmState,
     ) -> Self {
         Self {
-            main_chain: EvmChainState {
+            main_chain: EvmChain {
                 chain_id: evm_chain_id,
                 evm_state: RwLock::new(evm_state),
                 evm_changed_list: RwLock::new(None),
@@ -1152,7 +1150,7 @@ impl EvmBank {
         }
     }
 
-    pub fn main_chain(&self) -> &EvmChainState {
+    pub fn main_chain(&self) -> &EvmChain {
         &self.main_chain
     }
 }
@@ -1166,13 +1164,7 @@ impl Bank {
     pub fn take_evm_state_cloned(&self) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
         let is_frozen = self.is_frozen();
         let slot = self.slot();
-        match &*self
-            .evm
-            .main_chain
-            .evm_state
-            .read()
-            .expect("bank evm state was poisoned")
-        {
+        match &*self.evm().main_chain().state() {
             evm_state::EvmState::Incomming(i) => Some(i.clone()),
             evm_state::EvmState::Committed(_) => {
                 warn!(
@@ -1190,13 +1182,7 @@ impl Bank {
     pub fn take_evm_state_form_simulation(
         &self,
     ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
-        match &*self
-            .evm
-            .main_chain
-            .evm_state
-            .read()
-            .expect("bank evm state was poisoned")
-        {
+        match &*self.evm().main_chain().state() {
             evm_state::EvmState::Incomming(i) => Some(i.clone()),
             evm_state::EvmState::Committed(c) => {
                 debug!("Creating cloned evm state for simulation");
@@ -1219,11 +1205,9 @@ impl Bank {
     ) -> Result<Signature> {
         let blockhash = self.last_blockhash();
         let nonce = self
-            .evm
-            .main_chain
-            .evm_state
-            .read()
-            .unwrap()
+            .evm()
+            .main_chain()
+            .state()
             .get_account_state(keypair.to_address())
             .map(|s| s.nonce)
             .unwrap_or_else(|| 0.into());
@@ -1253,7 +1237,7 @@ impl Bank {
     pub fn commit_evm(&self) {
         let mut measure = Measure::start("commit-evm-block-ms");
 
-        let old_root = self.evm.main_chain.evm_state.read().unwrap().last_root();
+        let old_root = self.evm().main_chain().state().last_root();
         let hash = self
             .evm
             .main_chain
@@ -1309,7 +1293,7 @@ impl Bank {
             .main_chain
             .evm_blockhashes
             .read()
-            .expect("evm_blockhahes poisoned")
+            .expect("evm_blockhashes poisoned")
             .get_hashes()
     }
 
@@ -1346,10 +1330,10 @@ impl Bank {
     }
 }
 
-impl PartialEq for EvmChainState {
+impl PartialEq for EvmChain {
     fn eq(&self, other: &Self) -> bool {
-        let last_root_self = self.evm_state.read().unwrap().last_root();
-        let last_root_other = other.evm_state.read().unwrap().last_root();
+        let last_root_self = self.state().last_root();
+        let last_root_other = other.state().last_root();
 
         self.chain_id == other.chain_id && last_root_self == last_root_other
     }
