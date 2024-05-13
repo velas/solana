@@ -34,13 +34,8 @@ async fn main() {
     builder.target(Target::Stderr);
     builder.init();
 
-    match dotenv {
-        Ok(path) => {
-            log::info!(r#""{}" successfully loaded"#, path.display())
-        }
-        Err(e) => {
-            log::warn!(r#"".env" file not found: {e:?}""#)
-        }
+    if let Ok(path) = dotenv {
+        log::info!(r#""{}" successfully loaded"#, path.display())
     }
 
     let execution_result = match cli.subcommand {
@@ -54,7 +49,8 @@ async fn main() {
         RepeatEvm(args) => repeat_evm(args).await,
         RepeatNative(args) => repeat_native(args).await,
         ScanEvmStateRoots(ref args) => scan_evm_state_roots::command(args).await,
-        ScratchPad => scratchpad::command().await,
+        AccountLedger(args) => account_ledger(cli.creds, cli.instance, args).await,
+        NativeByEvm(args) => native_by_evm(cli.creds, cli.instance, args).await,
         Completion(args) => completion(args),
     };
 

@@ -85,6 +85,12 @@ pub enum AppError {
         limit: usize,
     },
 
+    #[error("Unable to fetch Signatures")]
+    GetSignatures {
+        #[source]
+        source: solana_storage_bigtable::Error,
+    },
+
     #[error("Unable to write block to bigtable")]
     UploadEvmBlock(#[source] solana_storage_bigtable::Error),
 
@@ -144,6 +150,7 @@ impl AppError {
             AppError::TokioTaskJoin(_) => 1021,
             AppError::IO(_) => 1022,
             AppError::Storage(_) => 1023,
+            AppError::GetSignatures { .. } => 1024,
         }
     }
 }
