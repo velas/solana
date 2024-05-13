@@ -58,10 +58,10 @@ pub async fn native_by_evm(
 
     let signature = result_tx.transaction_signature();
 
-    log::info!("EVM Hash: {hash:?}");
+    log::info!("EVM Transaction Hash: {hash:?}");
     log::info!("Native Transaction Signature: {signature}");
     if !evm_hash_found {
-        log::warn!("Logs does NOT contain EVM hash: {hash:?}");
+        log::warn!("Logs do NOT contain EVM Transaction Hash: {hash:?}");
         log::debug!("{logs:?}");
     }
 
