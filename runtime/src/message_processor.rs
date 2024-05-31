@@ -74,6 +74,7 @@ impl MessageProcessor {
         current_accounts_data_len: u64,
         accumulated_consumed_units: &mut u64,
         evm_executor: Option<Rc<RefCell<evm_state::Executor>>>,
+        // &mut Factory
     ) -> Result<ProcessedMessageInfo, TransactionError> {
         let mut invoke_context = InvokeContext::new(
             transaction_context,

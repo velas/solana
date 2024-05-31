@@ -37,7 +37,7 @@ use {
     solana_program_runtime::timings::ExecuteTimings,
     solana_runtime::{
         bank::{
-            Bank, CommitTransactionCounts, LoadAndExecuteTransactionsOutput,
+            Bank, CommitTransactionCounts, EvmExecutorFactory, LoadAndExecuteTransactionsOutput,
             TransactionBalancesSet, TransactionCheckResult, TransactionExecutionResult,
         },
         bank_forks::BankForks,
@@ -1340,7 +1340,7 @@ impl BankingStage {
                     transaction_status_sender.is_some(),
                     &mut execute_and_commit_timings.execute_timings,
                     None, // account_overrides
-                    Bank::take_evm_state_cloned,
+                    EvmExecutorFactory::new_for_execution(),
                 )
             },
             (),

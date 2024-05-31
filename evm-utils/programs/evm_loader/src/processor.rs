@@ -72,15 +72,17 @@ impl EvmProcessor {
             return Err(EvmError::CrossExecutionNotEnabled.into());
         }
 
-        let evm_executor = if let Some(evm_executor) = invoke_context.get_evm_executor() {
-            evm_executor
-        } else {
-            ic_msg!(
-                invoke_context,
-                "Invoke context didn't provide evm executor."
-            );
-            return Err(EvmError::EvmExecutorNotFound.into());
-        };
+        // processor gets access to factory from invoke context
+        let evm_executor =
+            if let Some(evm_executor) = invoke_context.get_evm_executor(/* evm_state_account */) {
+                evm_executor
+            } else {
+                ic_msg!(
+                    invoke_context,
+                    "Invoke context didn't provide evm executor."
+                );
+                return Err(EvmError::EvmExecutorNotFound.into());
+            };
         // bind variable to increase lifetime of temporary RefCell borrow.
         let mut evm_executor_borrow;
         // evm executor cannot be borrowed, because it not exist in invoke context, or borrowing failed.

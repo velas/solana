@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::RwLock};
 
 use crate::bank::log_enabled;
-use evm_state::{AccountProvider, FromKey};
+use evm_state::{AccountProvider, EvmBackend, Executor, FromKey, Incomming};
 use log::{debug, warn};
 use solana_measure::measure::Measure;
 use solana_sdk::{
@@ -107,37 +107,6 @@ impl Bank {
             .clone()
     }
 
-    // TODO: Add chain id
-    pub fn take_evm_state_cloned(&self) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
-        let is_frozen = self.is_frozen();
-        let slot = self.slot();
-        match &*self.evm().main_chain().state() {
-            evm_state::EvmState::Incomming(i) => Some(i.clone()),
-            evm_state::EvmState::Committed(_) => {
-                warn!(
-                    "Take evm after freeze, bank_slot={}, bank_is_freeze={}",
-                    slot, is_frozen
-                );
-                // Return None, so this transaction will fail to execute,
-                // this transaction will be marked as retriable after bank realise that PoH is reached it's max height.
-                None
-            }
-        }
-    }
-
-    // TODO: Add chain id
-    pub fn take_evm_state_form_simulation(
-        &self,
-    ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
-        match &*self.evm().main_chain().state() {
-            evm_state::EvmState::Incomming(i) => Some(i.clone()),
-            evm_state::EvmState::Committed(c) => {
-                debug!("Creating cloned evm state for simulation");
-                Some(c.next_incomming(self.clock().unix_timestamp as u64))
-            }
-        }
-    }
-
     pub fn evm_burn_fee_activated(&self) -> bool {
         self.feature_set
             .is_active(&feature_set::velas::burn_fee::id())
@@ -234,6 +203,7 @@ impl Bank {
         }
     }
 
+    // TODO: add parameter: chain_id: ChainId
     pub fn evm_hashes(&self) -> [evm_state::H256; crate::blockhash_queue::MAX_EVM_BLOCKHASHES] {
         *self
             .evm
@@ -283,5 +253,103 @@ impl PartialEq for EvmChain {
         let last_root_other = other.state().last_root();
 
         self.chain_id == other.chain_id && last_root_self == last_root_other
+    }
+}
+
+// create factory: ExecutorFactory::new()
+// struct ExecutorFactory {
+//    ...
+// };
+// impl ExecutorFactory {
+//     pub fn get_executor(&mut self, chain_id: ChainID) -> Option<Executor>;
+//     pub fn destruct(self) -> Vec<(ChainId, EvmBackend)>;
+// }
+
+// deserilalizer: fn (Account) -> ChainId;
+// executor_factory: fn (ChainId) -> Option<Executor>;
+// executor_getter: fn (Account) -> Option<Executor> = deserializer * executor_factory
+
+#[derive(Clone)]
+pub struct EvmExecutorFactory {
+    // ANCHOR - VELAS
+    // TODO: add chain_id
+    state_getter: fn(&Bank) -> Option<EvmBackend<Incomming>>,
+}
+
+impl EvmExecutorFactory {
+    pub fn new_for_simulation() -> Self {
+        Self {
+            state_getter: Self::take_evm_state_form_simulation,
+        }
+    }
+
+    pub fn new_for_execution() -> Self {
+        Self {
+            state_getter: Self::take_evm_state_cloned,
+        }
+    }
+    // fn (ChainId) -> Option<Executor>;
+    pub fn get_executor(
+        &self,
+        bank: &Bank,
+        // chain_id: ChainID,
+        evm_patch: &mut Option<EvmBackend<Incomming>>,
+    ) -> Option<Executor> {
+        // append to old patch if exist, or create new, from existing evm state
+        *evm_patch = evm_patch.take().or_else(|| (self.state_getter)(bank));
+        let last_hashes = bank.evm_hashes(/*chain_id */);
+        if let Some(state) = &evm_patch {
+            let evm_executor = evm_state::Executor::with_config(
+                state.clone(),
+                evm_state::ChainContext::new(last_hashes),
+                evm_state::EvmConfig::new(
+                    /*chain_id */ bank.evm().main_chain().id(),
+                    bank.evm_burn_fee_activated(),
+                ),
+                evm_state::executor::FeatureSet::new(
+                    bank.feature_set
+                        .is_active(&solana_sdk::feature_set::velas::unsigned_tx_fix::id()),
+                    bank.feature_set
+                        .is_active(&solana_sdk::feature_set::velas::clear_logs_on_error::id()),
+                    bank.feature_set.is_active(
+                        &solana_sdk::feature_set::velas::accept_zero_gas_price_with_native_fee::id(
+                        ),
+                    ),
+                ),
+            );
+            Some(evm_executor)
+        } else {
+            warn!("Executing evm transaction on already locked bank, ignoring.");
+            None
+        }
+    }
+
+    fn take_evm_state_cloned(bank: &Bank) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
+        let is_frozen = bank.is_frozen();
+        let slot = bank.slot();
+        match &*bank.evm().main_chain().state() {
+            evm_state::EvmState::Incomming(i) => Some(i.clone()),
+            evm_state::EvmState::Committed(_) => {
+                warn!(
+                    "Take evm after freeze, bank_slot={}, bank_is_freeze={}",
+                    slot, is_frozen
+                );
+                // Return None, so this transaction will fail to execute,
+                // this transaction will be marked as retriable after bank realise that PoH is reached it's max height.
+                None
+            }
+        }
+    }
+
+    fn take_evm_state_form_simulation(
+        bank: &Bank,
+    ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
+        match &*bank.evm().main_chain().state() {
+            evm_state::EvmState::Incomming(i) => Some(i.clone()),
+            evm_state::EvmState::Committed(c) => {
+                debug!("Creating cloned evm state for simulation");
+                Some(c.next_incomming(bank.clock().unix_timestamp as u64))
+            }
+        }
     }
 }

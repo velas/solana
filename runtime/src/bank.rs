@@ -33,12 +33,14 @@
 //! It offers a high-level API that signs transactions
 //! on behalf of the caller, and a low-level API for when they have
 //! already been signed and verified.
+pub use evm::EvmExecutorFactory;
 use evm_state::EvmState;
 use solana_evm_loader_program::processor::EvmProcessor;
 use solana_sdk::message::AccountKeys;
 #[allow(deprecated)]
 use solana_sdk::recent_blockhashes_account;
 pub use solana_sdk::reward_type::RewardType;
+
 use {
     crate::{
         account_overrides::AccountOverrides,
@@ -3736,7 +3738,7 @@ impl Bank {
             true,
             &mut timings,
             Some(&account_overrides),
-            Self::take_evm_state_form_simulation,
+            EvmExecutorFactory::new_for_simulation(),
         );
 
         let post_simulation_accounts = loaded_transactions
@@ -4056,10 +4058,11 @@ impl Bank {
         enable_log_recording: bool,
         timings: &mut ExecuteTimings,
         error_counters: &mut TransactionErrorMetrics,
-        evm_patch: &mut Option<evm_state::EvmBackend<evm_state::Incomming>>,
         // ANCHOR - VELAS
+        // TODO: &mut HashMap<ChainID, evm_state::EvmBackend<evm_state::Incomming>>,
+        evm_patch: &mut Option<evm_state::EvmBackend<evm_state::Incomming>>,
         // TODO: Add chain id
-        evm_state_getter: impl Fn(&Self) -> Option<evm_state::EvmBackend<evm_state::Incomming>>,
+        evm_executor_factory: EvmExecutorFactory,
     ) -> TransactionExecutionResult {
         let mut get_executors_time = Measure::start("get_executors_time");
         let executors = self.get_executors(&loaded_transaction.accounts);
@@ -4086,37 +4089,22 @@ impl Bank {
             None
         };
 
-        let mut evm_create_executor = Measure::start("evm_create_executor");
         // ANCHOR - VELAS
+        // evm_patch = accumulated changes for all txs in batch
+        // evm_state_getter = constructor of this patch if patch is none
         // Create evm_executor only if evm_state account is locked.
         // Executor can be used to execute multiple transactions, but currently executor only created for single tx.
-        let evm_executor /* (chain_id) */ = if tx.message().is_modify_evm_state() {
-            // append to old patch if exist, or create new, from existing evm state
-            *evm_patch = evm_patch.take().or_else(|| evm_state_getter(self /*chain_id */));
-            let last_hashes = self.evm_hashes(/*chain_id */);
-            if let Some(state) = &evm_patch {
-                let evm_executor = evm_state::Executor::with_config(
-                    state.clone(),
-                    evm_state::ChainContext::new(last_hashes),
-                    evm_state::EvmConfig::new( /*chain_id */ self.evm().main_chain().id(), self.evm_burn_fee_activated()),
-                    evm_state::executor::FeatureSet::new(
-                        self.feature_set
-                            .is_active(&solana_sdk::feature_set::velas::unsigned_tx_fix::id()),
-                        self.feature_set
-                            .is_active(&solana_sdk::feature_set::velas::clear_logs_on_error::id()),
-                        self.feature_set
-                            .is_active(&solana_sdk::feature_set::velas::accept_zero_gas_price_with_native_fee::id()),
-                    ),
-                );
-                Some(evm_executor)
-            } else {
-                warn!("Executing evm transaction on already locked bank, ignoring.");
-                None
-            }
+
+        let mut evm_create_executor = Measure::start("evm_create_executor");
+
+        let evm_executor = if tx.message().is_modify_evm_state() {
+            evm_executor_factory.get_executor(&self, evm_patch)
         } else {
             None
         };
+
         evm_create_executor.stop();
+
         timings.details.create_evm_executor_us += evm_create_executor.as_us();
         // Create reference counted pointer, to pass evm executor trought InvokeContext.
         // Without Rc/RefCell we need to somehow provide mutable evm executor from InvokeContext,
@@ -4144,7 +4132,8 @@ impl Bank {
             lamports_per_signature,
             self.load_accounts_data_size(),
             &mut executed_units,
-            evm_executor.clone(),
+            evm_executor.clone(), // pass factory as argument instead of executor
+                                  // &mut Factory
         );
         process_message_time.stop();
 
@@ -4153,15 +4142,25 @@ impl Bank {
             process_message_time.as_us()
         );
 
-        //TODO(velas): Move evm_state apply to update executors
-        let evm_new_error_handling = self
-            .feature_set
-            .is_active(&solana_sdk::feature_set::velas::evm_new_error_handling::id());
+        // On cleanup:
+        // for (chain_id, changed_patches) in evm_factory.destruct() {
+        // if matches!(process_result, Err(TransactionError::InstructionError(..))) {
+        //     evm_patch
+        //         .get_mut(chain_id)
+        //         .expect("Evm patch should exist, on transaction execution.")
+        //         .apply_failed_update(&changed_patches, clear_logs);
+        // } else {
+        //     *evm_patch.get_mut(chain_id).expect("Evm patch should exist, on transaction execution.") = Some(changed_patches);
+        // }
+
         if let Some(evm_executor) = evm_executor {
             let executor = Rc::try_unwrap(evm_executor)
                 .expect("Rc should be free after message processing.")
                 .into_inner();
             let new_patch = executor.deconstruct();
+            let evm_new_error_handling = self
+                .feature_set
+                .is_active(&solana_sdk::feature_set::velas::evm_new_error_handling::id());
             // On error save only transaction and increase nonce.
             if matches!(process_result, Err(TransactionError::InstructionError(..)))
                 && evm_new_error_handling
@@ -4244,7 +4243,9 @@ impl Bank {
             executors,
         }
     }
-
+    // 128 -> load_and_execute (w evm_state_account) 12tx -> [rw_lock(copy state) + modify + rw_lock(replace)] -> 116tx
+    //       128 -> load_and_execute  (w evm_state_main) < revert
+    //
     #[allow(clippy::type_complexity)]
     pub fn load_and_execute_transactions(
         &self,
@@ -4256,7 +4257,7 @@ impl Bank {
         account_overrides: Option<&AccountOverrides>,
         // ANCHOR - VELAS
         // TODO: Add chain id
-        evm_state_getter: impl Fn(&Self) -> Option<evm_state::EvmBackend<evm_state::Incomming>> + Clone,
+        evm_executor_factory: EvmExecutorFactory,
     ) -> LoadAndExecuteTransactionsOutput {
         let sanitized_txs = batch.sanitized_transactions();
         debug!("processing transactions: {}", sanitized_txs.len());
@@ -4323,7 +4324,7 @@ impl Bank {
         load_time.stop();
 
         let mut execution_time = Measure::start("execution_time");
-        let mut evm_patch = None;
+        let mut evm_patch = None; // HashMap<ChainId,EvmBackend<>>
         let mut signature_count: u64 = 0;
 
         let execution_results: Vec<TransactionExecutionResult> = loaded_transactions
@@ -4383,7 +4384,7 @@ impl Bank {
                         timings,
                         &mut error_counters,
                         &mut evm_patch,
-                        evm_state_getter.clone(),
+                        evm_executor_factory.clone(),
                     )
                 }
             })
@@ -5661,7 +5662,7 @@ impl Bank {
             enable_log_recording,
             timings,
             None,
-            Self::take_evm_state_cloned,
+            EvmExecutorFactory::new_for_execution(),
         );
 
         let (last_blockhash, lamports_per_signature) =
