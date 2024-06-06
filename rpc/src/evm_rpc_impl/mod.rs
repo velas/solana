@@ -1100,7 +1100,8 @@ fn call_many(
     };
 
     //TODO: Hashes actual to saved root
-    let last_hashes = bank.evm_hashes();
+    // Copy 8kb
+    let last_hashes = *bank.evm().main_chain().blockhashes().get_hashes();
     let mut executor = evm_state::Executor::with_config(
         evm_state,
         evm_state::ChainContext::new(last_hashes),

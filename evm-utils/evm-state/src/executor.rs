@@ -154,7 +154,7 @@ impl fmt::Display for ExecutionResult {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct FeatureSet {
     unsigned_tx_fix: bool,
     clear_logs_on_error: bool,

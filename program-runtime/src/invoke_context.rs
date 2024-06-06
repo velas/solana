@@ -197,6 +197,7 @@ impl<'a> StackFrame<'a> {
             .map(|keyed_account| keyed_account.unsigned_key())
     }
 }
+// 1. EvmFactory in program-runtime
 
 pub struct InvokeContext<'a> {
     pub transaction_context: &'a mut TransactionContext,
@@ -217,7 +218,7 @@ pub struct InvokeContext<'a> {
     pub lamports_per_signature: u64,
     // ANCHOR - VELAS
     // &mut instead of Rc<RefCell<>>
-    evm_executor: Option<Rc<RefCell<evm_state::Executor>>>,
+    evm_executor: Option<Rc<RefCell<evm_state::Executor>>>, // executor = TrieDb + [Hash]
 }
 
 impl<'a> InvokeContext<'a> {

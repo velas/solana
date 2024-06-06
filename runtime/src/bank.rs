@@ -3738,7 +3738,7 @@ impl Bank {
             true,
             &mut timings,
             Some(&account_overrides),
-            EvmExecutorFactory::new_for_simulation(),
+            EvmExecutorFactory::new_for_simulation(&self),
         );
 
         let post_simulation_accounts = loaded_transactions
@@ -4058,11 +4058,7 @@ impl Bank {
         enable_log_recording: bool,
         timings: &mut ExecuteTimings,
         error_counters: &mut TransactionErrorMetrics,
-        // ANCHOR - VELAS
-        // TODO: &mut HashMap<ChainID, evm_state::EvmBackend<evm_state::Incomming>>,
-        evm_patch: &mut Option<evm_state::EvmBackend<evm_state::Incomming>>,
-        // TODO: Add chain id
-        evm_executor_factory: EvmExecutorFactory,
+        evm_executor_factory: &mut EvmExecutorFactory,
     ) -> TransactionExecutionResult {
         let mut get_executors_time = Measure::start("get_executors_time");
         let executors = self.get_executors(&loaded_transaction.accounts);
@@ -4098,7 +4094,7 @@ impl Bank {
         let mut evm_create_executor = Measure::start("evm_create_executor");
 
         let evm_executor = if tx.message().is_modify_evm_state() {
-            evm_executor_factory.get_executor(&self, evm_patch)
+            evm_executor_factory.get_executor()
         } else {
             None
         };
@@ -4142,39 +4138,11 @@ impl Bank {
             process_message_time.as_us()
         );
 
-        // On cleanup:
-        // for (chain_id, changed_patches) in evm_factory.destruct() {
-        // if matches!(process_result, Err(TransactionError::InstructionError(..))) {
-        //     evm_patch
-        //         .get_mut(chain_id)
-        //         .expect("Evm patch should exist, on transaction execution.")
-        //         .apply_failed_update(&changed_patches, clear_logs);
-        // } else {
-        //     *evm_patch.get_mut(chain_id).expect("Evm patch should exist, on transaction execution.") = Some(changed_patches);
-        // }
-
         if let Some(evm_executor) = evm_executor {
             let executor = Rc::try_unwrap(evm_executor)
                 .expect("Rc should be free after message processing.")
                 .into_inner();
-            let new_patch = executor.deconstruct();
-            let evm_new_error_handling = self
-                .feature_set
-                .is_active(&solana_sdk::feature_set::velas::evm_new_error_handling::id());
-            // On error save only transaction and increase nonce.
-            if matches!(process_result, Err(TransactionError::InstructionError(..)))
-                && evm_new_error_handling
-            {
-                let clear_logs = self
-                    .feature_set
-                    .is_active(&solana_sdk::feature_set::velas::clear_logs_on_native_error::id());
-                evm_patch
-                    .as_mut()
-                    .expect("Evm patch should exist, on transaction execution.")
-                    .apply_failed_update(&new_patch, clear_logs);
-            } else {
-                *evm_patch = Some(new_patch);
-            }
+            evm_executor_factory.cleanup(executor, &process_result);
         }
 
         let mut store_missing_executors_time = Measure::start("store_missing_executors_time");
@@ -4255,9 +4223,7 @@ impl Bank {
         enable_log_recording: bool,
         timings: &mut ExecuteTimings,
         account_overrides: Option<&AccountOverrides>,
-        // ANCHOR - VELAS
-        // TODO: Add chain id
-        evm_executor_factory: EvmExecutorFactory,
+        mut evm_executor_factory: EvmExecutorFactory,
     ) -> LoadAndExecuteTransactionsOutput {
         let sanitized_txs = batch.sanitized_transactions();
         debug!("processing transactions: {}", sanitized_txs.len());
@@ -4324,7 +4290,8 @@ impl Bank {
         load_time.stop();
 
         let mut execution_time = Measure::start("execution_time");
-        let mut evm_patch = None; // HashMap<ChainId,EvmBackend<>>
+        // ANCHOR - VELAS
+        // evm_executor_factory.reset_patch(); // set `evm_patch` to None?
         let mut signature_count: u64 = 0;
 
         let execution_results: Vec<TransactionExecutionResult> = loaded_transactions
@@ -4383,8 +4350,7 @@ impl Bank {
                         enable_log_recording,
                         timings,
                         &mut error_counters,
-                        &mut evm_patch,
-                        evm_executor_factory.clone(),
+                        &mut evm_executor_factory,
                     )
                 }
             })
@@ -4514,7 +4480,7 @@ impl Bank {
             executed_with_successful_result_count,
             signature_count,
             error_counters,
-            evm_patch,
+            evm_patch: evm_executor_factory.get_patch_cloned(),
         }
     }
 
@@ -5662,7 +5628,7 @@ impl Bank {
             enable_log_recording,
             timings,
             None,
-            EvmExecutorFactory::new_for_execution(),
+            EvmExecutorFactory::new_for_execution(&self),
         );
 
         let (last_blockhash, lamports_per_signature) =
