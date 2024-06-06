@@ -6,6 +6,7 @@ use {
     },
     crate::{ancestors::AncestorsForSerialization, stakes::StakesCache},
     solana_measure::measure::Measure,
+    solana_program_runtime::evm_executor_context::BlockHashEvm,
     std::{cell::RefCell, collections::HashSet, sync::RwLock},
 };
 

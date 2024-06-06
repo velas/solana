@@ -4,6 +4,7 @@
 
 pub mod accounts_data_meter;
 pub mod compute_budget;
+pub mod evm_executor_context;
 pub mod invoke_context;
 pub mod log_collector;
 pub mod native_loader;

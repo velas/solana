@@ -4,6 +4,7 @@ use crate::{bank::log_enabled, message_processor::ProcessedMessageInfo};
 use evm_state::{AccountProvider, EvmBackend, Executor, FromKey, Incomming};
 use log::{debug, warn};
 use solana_measure::measure::Measure;
+use solana_program_runtime::evm_executor_context::{BlockHashEvm, MAX_EVM_BLOCKHASHES};
 use solana_sdk::{
     clock::Slot,
     feature_set,
@@ -14,8 +15,6 @@ use solana_sdk::{
     sysvar,
     transaction::{Result, Transaction, TransactionError},
 };
-
-use crate::blockhash_queue::BlockHashEvm;
 
 use super::Bank;
 
@@ -224,7 +223,7 @@ impl Bank {
 
     fn update_recent_evm_blockhashes_locked(&self, locked_blockhash_queue: &BlockHashEvm) {
         self.update_sysvar_account(&sysvar::recent_evm_blockhashes::id(), |account| {
-            let mut hashes = [Hash::default(); crate::blockhash_queue::MAX_EVM_BLOCKHASHES];
+            let mut hashes = [Hash::default(); MAX_EVM_BLOCKHASHES];
             for (i, hash) in locked_blockhash_queue.get_hashes().iter().enumerate() {
                 hashes[i] = Hash::new_from_array(*hash.as_fixed_bytes())
             }

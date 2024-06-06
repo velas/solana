@@ -36,6 +36,7 @@
 pub use evm::EvmExecutorFactory;
 use evm_state::EvmState;
 use solana_evm_loader_program::processor::EvmProcessor;
+use solana_program_runtime::evm_executor_context::BlockHashEvm;
 use solana_sdk::message::AccountKeys;
 #[allow(deprecated)]
 use solana_sdk::recent_blockhashes_account;
@@ -52,7 +53,7 @@ use {
         accounts_index::{AccountSecondaryIndexes, IndexKey, ScanConfig, ScanResult},
         accounts_update_notifier_interface::AccountsUpdateNotifier,
         ancestors::{Ancestors, AncestorsForSerialization},
-        blockhash_queue::{BlockHashEvm, BlockhashQueue},
+        blockhash_queue::BlockhashQueue,
         builtins::{self, BuiltinAction, BuiltinFeatureTransition, Builtins},
         cost_tracker::CostTracker,
         epoch_stakes::{EpochStakes, NodeVoteAccounts},

@@ -9,7 +9,7 @@ use {
         accounts_update_notifier_interface::AccountsUpdateNotifier,
         append_vec::{AppendVec, StoredMetaWriteVersion},
         bank::{Bank, BankFieldsToDeserialize, BankRc},
-        blockhash_queue::{BlockHashEvm, BlockhashQueue},
+        blockhash_queue::BlockhashQueue,
         builtins::Builtins,
         epoch_stakes::EpochStakes,
         hardened_unpack::UnpackedAppendVecMap,
