@@ -33,10 +33,12 @@
 //! It offers a high-level API that signs transactions
 //! on behalf of the caller, and a low-level API for when they have
 //! already been signed and verified.
-pub use evm::EvmExecutorFactory;
+pub use evm::EvmExecutorContextFactory;
 use evm_state::EvmState;
 use solana_evm_loader_program::processor::EvmProcessor;
-use solana_program_runtime::evm_executor_context::BlockHashEvm;
+use solana_program_runtime::evm_executor_context::{
+    BlockHashEvm, ChainID, EvmBank, EvmExecutorContext, PatchStrategy,
+};
 use solana_sdk::message::AccountKeys;
 #[allow(deprecated)]
 use solana_sdk::recent_blockhashes_account;
@@ -967,7 +969,7 @@ pub(crate) struct BankFieldsToDeserialize {
     pub(crate) is_delta: bool,
     // ANCHOR - VELAS
     // TODO: put side chain details into snapshot
-    pub(crate) evm_chain_id: evm::ChainID,
+    pub(crate) evm_chain_id: ChainID,
     pub(crate) evm_persist_fields: evm_state::EvmPersistState,
     pub(crate) evm_blockhashes: BlockHashEvm,
     pub(crate) accounts_data_len: u64,
@@ -1120,7 +1122,7 @@ pub struct Bank {
     pub ancestors: Ancestors,
 
     /// Velas EVM Bank
-    evm: evm::EvmBank,
+    evm: EvmBank,
 
     /// Hash of this Bank's state. Only meaningful after freezing.
     hash: RwLock<Hash>,
@@ -1524,7 +1526,9 @@ impl Bank {
         bank.ancestors = Ancestors::from(vec![bank.slot()]);
         bank.transaction_debug_keys = debug_keys;
         bank.cluster_type = Some(genesis_config.cluster_type);
-        bank.evm.main_chain.chain_id = genesis_config.evm_chain_id;
+        bank.evm
+            .main_chain_mut()
+            .set_id(genesis_config.evm_chain_id);
 
         bank.process_genesis_config(genesis_config);
         bank.finish_init(
@@ -1732,7 +1736,7 @@ impl Bank {
             epoch,
             blockhash_queue,
 
-            evm: evm::EvmBank::new(
+            evm: EvmBank::new(
                 parent.evm.main_chain().id(),
                 parent.evm.main_chain().blockhashes().clone(),
                 evm_state,
@@ -2063,7 +2067,7 @@ impl Bank {
             blockhash_queue: RwLock::new(fields.blockhash_queue),
             // ANCHOR - VELAS
             // TODO: deserialize chain details from snapshot
-            evm: evm::EvmBank::new(fields.evm_chain_id, fields.evm_blockhashes, evm_state),
+            evm: EvmBank::new(fields.evm_chain_id, fields.evm_blockhashes, evm_state),
             ancestors: Ancestors::from(&fields.ancestors),
             hash: RwLock::new(fields.hash),
             parent_hash: fields.parent_hash,
@@ -2186,7 +2190,7 @@ impl Bank {
         // TODO: serialize sidechains
         BankFieldsToSerialize {
             blockhash_queue: &self.blockhash_queue,
-            evm_blockhashes: &self.evm.main_chain.evm_blockhashes,
+            evm_blockhashes: &self.evm().main_chain().blockhashes_raw(),
             evm_chain_id: self.evm.main_chain().id(),
             evm_persist_fields: self.evm.main_chain().state().clone().save_state(),
             ancestors,
@@ -3739,7 +3743,7 @@ impl Bank {
             true,
             &mut timings,
             Some(&account_overrides),
-            EvmExecutorFactory::new_for_simulation(&self),
+            EvmExecutorContextFactory::create_for_simulation(&self),
         );
 
         let post_simulation_accounts = loaded_transactions
@@ -4059,7 +4063,7 @@ impl Bank {
         enable_log_recording: bool,
         timings: &mut ExecuteTimings,
         error_counters: &mut TransactionErrorMetrics,
-        evm_executor_factory: &mut EvmExecutorFactory,
+        evm_executor_context: &mut EvmExecutorContext,
     ) -> TransactionExecutionResult {
         let mut get_executors_time = Measure::start("get_executors_time");
         let executors = self.get_executors(&loaded_transaction.accounts);
@@ -4095,7 +4099,7 @@ impl Bank {
         let mut evm_create_executor = Measure::start("evm_create_executor");
 
         let evm_executor = if tx.message().is_modify_evm_state() {
-            evm_executor_factory.get_executor()
+            evm_executor_context.get_executor()
         } else {
             None
         };
@@ -4143,7 +4147,15 @@ impl Bank {
             let executor = Rc::try_unwrap(evm_executor)
                 .expect("Rc should be free after message processing.")
                 .into_inner();
-            evm_executor_factory.cleanup(executor, &process_result);
+            let strategy = if matches!(process_result, Err(TransactionError::InstructionError(..)))
+                && evm_executor_context.evm_new_error_handling
+            {
+                PatchStrategy::ApplyFailed
+            } else {
+                PatchStrategy::SetNew
+            };
+
+            evm_executor_context.cleanup(executor, strategy);
         }
 
         let mut store_missing_executors_time = Measure::start("store_missing_executors_time");
@@ -4224,7 +4236,7 @@ impl Bank {
         enable_log_recording: bool,
         timings: &mut ExecuteTimings,
         account_overrides: Option<&AccountOverrides>,
-        mut evm_executor_factory: EvmExecutorFactory,
+        mut evm_executor_context: EvmExecutorContext,
     ) -> LoadAndExecuteTransactionsOutput {
         let sanitized_txs = batch.sanitized_transactions();
         debug!("processing transactions: {}", sanitized_txs.len());
@@ -4291,8 +4303,6 @@ impl Bank {
         load_time.stop();
 
         let mut execution_time = Measure::start("execution_time");
-        // ANCHOR - VELAS
-        // evm_executor_factory.reset_patch(); // set `evm_patch` to None?
         let mut signature_count: u64 = 0;
 
         let execution_results: Vec<TransactionExecutionResult> = loaded_transactions
@@ -4351,7 +4361,7 @@ impl Bank {
                         enable_log_recording,
                         timings,
                         &mut error_counters,
-                        &mut evm_executor_factory,
+                        &mut evm_executor_context,
                     )
                 }
             })
@@ -4481,7 +4491,7 @@ impl Bank {
             executed_with_successful_result_count,
             signature_count,
             error_counters,
-            evm_patch: evm_executor_factory.get_patch_cloned(),
+            evm_patch: evm_executor_context.get_patch_cloned(),
         }
     }
 
@@ -5629,7 +5639,7 @@ impl Bank {
             enable_log_recording,
             timings,
             None,
-            EvmExecutorFactory::new_for_execution(&self),
+            EvmExecutorContextFactory::create_for_execution(&self),
         );
 
         let (last_blockhash, lamports_per_signature) =

@@ -1,102 +1,21 @@
-use std::{collections::HashMap, sync::RwLock};
-
-use crate::{bank::log_enabled, message_processor::ProcessedMessageInfo};
-use evm_state::{AccountProvider, EvmBackend, Executor, FromKey, Incomming};
-use log::{debug, warn};
+use crate::bank::log_enabled;
+use evm_state::{AccountProvider, FromKey};
+use log::debug;
 use solana_measure::measure::Measure;
-use solana_program_runtime::evm_executor_context::{BlockHashEvm, MAX_EVM_BLOCKHASHES};
+use solana_program_runtime::evm_executor_context::{
+    BlockHashEvm, EvmBank, EvmExecutorContext, EvmExecutorContextType, MAX_EVM_BLOCKHASHES,
+};
 use solana_sdk::{
-    clock::Slot,
     feature_set,
     hash::Hash,
     recent_evm_blockhashes_account,
     signature::{Keypair, Signature},
     signer::Signer,
     sysvar,
-    transaction::{Result, Transaction, TransactionError},
+    transaction::{Result, Transaction},
 };
 
 use super::Bank;
-
-pub type ChainID = u64;
-
-#[derive(Debug, Default)]
-pub struct EvmChain {
-    pub(crate) chain_id: ChainID,
-    pub(crate) evm_state: RwLock<evm_state::EvmState>,
-    pub(crate) evm_changed_list: RwLock<Option<(evm_state::H256, evm_state::ChangedState)>>,
-    pub(crate) evm_blockhashes: RwLock<BlockHashEvm>,
-}
-
-impl Clone for EvmChain {
-    fn clone(&self) -> Self {
-        Self {
-            chain_id: self.chain_id.clone(),
-            evm_state: RwLock::new(self.evm_state.read().unwrap().clone()),
-            evm_changed_list: RwLock::new(self.evm_changed_list.read().unwrap().clone()),
-            evm_blockhashes: RwLock::new(self.evm_blockhashes.read().unwrap().clone()),
-        }
-    }
-}
-
-impl EvmChain {
-    /// EVM Chain ID
-    pub fn id(&self) -> ChainID {
-        self.chain_id
-    }
-
-    pub fn set_id(&mut self, id: ChainID) {
-        self.chain_id = id;
-    }
-
-    /// EVM State read-only lock
-    pub fn state<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, evm_state::EvmState> {
-        self.evm_state
-            .read()
-            .expect("EVM State RwLock was poisoned")
-    }
-
-    /// EVM State read-only lock
-    pub fn state_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, evm_state::EvmState> {
-        self.evm_state
-            .write()
-            .expect("EVM State RwLock was poisoned")
-    }
-
-    pub fn blockhashes<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, BlockHashEvm> {
-        self.evm_blockhashes
-            .read()
-            .expect("EVM Blockhashes RwLock was poisoned")
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Clone)]
-pub struct EvmBank {
-    pub(crate) main_chain: EvmChain,
-    pub(crate) side_chains: HashMap<ChainID, EvmChain>,
-}
-
-impl EvmBank {
-    pub fn new(
-        evm_chain_id: ChainID,
-        evm_blockhashes: BlockHashEvm,
-        evm_state: evm_state::EvmState,
-    ) -> Self {
-        Self {
-            main_chain: EvmChain {
-                chain_id: evm_chain_id,
-                evm_state: RwLock::new(evm_state),
-                evm_changed_list: RwLock::new(None),
-                evm_blockhashes: RwLock::new(evm_blockhashes),
-            },
-            side_chains: Default::default(),
-        }
-    }
-
-    pub fn main_chain(&self) -> &EvmChain {
-        &self.main_chain
-    }
-}
 
 impl Bank {
     pub fn evm(&self) -> &EvmBank {
@@ -104,16 +23,11 @@ impl Bank {
     }
 
     pub fn evm_block(&self) -> Option<evm_state::Block> {
-        self.evm.main_chain.state().get_block()
+        self.evm.main_chain().state().get_block()
     }
 
     pub fn evm_state_change(&self) -> Option<(evm_state::H256, evm_state::ChangedState)> {
-        self.evm
-            .main_chain
-            .evm_changed_list
-            .read()
-            .expect("List of EVM changes was poisoned")
-            .clone()
+        self.evm.main_chain().changed_list().clone()
     }
 
     pub fn evm_burn_fee_activated(&self) -> bool {
@@ -141,7 +55,7 @@ impl Bank {
             *to,
             nonce,
             n.into(),
-            Some(self.evm.main_chain.chain_id),
+            Some(self.evm.main_chain().id()),
         );
         let ix = solana_evm_loader_program::send_raw_tx(
             fee_payer.pubkey(),
@@ -165,10 +79,8 @@ impl Bank {
         let old_root = self.evm().main_chain().state().last_root();
         let hash = self
             .evm
-            .main_chain
-            .evm_state
-            .write()
-            .expect("evm state was poisoned")
+            .main_chain()
+            .state_write()
             .try_commit(self.slot(), self.last_blockhash().to_bytes())
             .expect("failed to commit evm");
 
@@ -179,30 +91,18 @@ impl Bank {
 
         debug!(
             "Set evm state root to {:?} at block {}",
-            self.evm.main_chain.evm_state.read().unwrap().last_root(),
-            self.evm.main_chain.evm_state.read().unwrap().block_number()
+            self.evm.main_chain().state().last_root(),
+            self.evm.main_chain().state().block_number()
         );
 
-        let mut w_evm_blockhash_queue = self
-            .evm
-            .main_chain
-            .evm_blockhashes
-            .write()
-            .expect("evm blockchashes poisoned");
+        let mut w_evm_blockhash_queue = self.evm.main_chain().blockhashes_write();
 
         if let Some((hash, changes)) = hash {
-            *self
-                .evm
-                .main_chain
-                .evm_changed_list
-                .write()
-                .expect("change list was poisoned") = Some((old_root, changes));
+            *self.evm.main_chain().changed_list_write() = Some((old_root, changes));
 
             self.evm
-                .main_chain
-                .evm_state
-                .write()
-                .expect("evm state was poisoned")
+                .main_chain()
+                .state_write()
                 .reregister_slot(self.slot())
                 .expect("Failed to change slot");
             w_evm_blockhash_queue.insert_hash(hash);
@@ -214,7 +114,7 @@ impl Bank {
 
     pub fn update_recent_blockhashes(&self) {
         let blockhash_queue = self.blockhash_queue.read().unwrap();
-        let evm_blockhashes = self.evm.main_chain.evm_blockhashes.read().unwrap();
+        let evm_blockhashes = self.evm.main_chain().blockhashes();
         self.update_recent_blockhashes_locked(&blockhash_queue);
         if !self.fix_recent_blockhashes_sysvar_evm() {
             self.update_recent_evm_blockhashes_locked(&evm_blockhashes);
@@ -245,67 +145,18 @@ impl Bank {
     }
 }
 
-impl PartialEq for EvmChain {
-    fn eq(&self, other: &Self) -> bool {
-        let last_root_self = self.state().last_root();
-        let last_root_other = other.state().last_root();
+pub struct EvmExecutorContextFactory;
 
-        self.chain_id == other.chain_id && last_root_self == last_root_other
-    }
-}
-
-// create factory: ExecutorFactory::new()
-// struct ExecutorFactory {
-//    ...
-// };
-// impl ExecutorFactory {
-//     pub fn get_executor(&mut self, chain_id: ChainID) -> Option<Executor>;
-//     pub fn destruct(self) -> Vec<(ChainId, EvmBackend)>;
-// }
-
-// deserilalizer: fn (Account) -> ChainId;
-// executor_factory: fn (ChainId) -> Option<Executor>;
-// executor_getter: fn (Account) -> Option<Executor> = deserializer * executor_factory
-
-// pub enum ExecutionMode
-
-// NOTE: this "clone" impl is questionable
-type EvmPatch = evm_state::EvmBackend<evm_state::Incomming>;
-
-// #[derive(Clone)]
-pub struct EvmExecutorFactory {
-    evm: EvmBank,
-
-    // evm_patches: HashMap<ChainID, EvmPatch>,
-    evm_patch: Option<EvmPatch>,
-
-    // extract into struct
-    feature_set: evm_state::executor::FeatureSet,
-    unix_timestamp: i64,
-    bank_slot: Slot,
-
-    // bank data used for logging
-    is_bank_frozen: bool,
-    is_evm_burn_fee_activated: bool,
-
-    // used for cleanup
-    evm_new_error_handling: bool,
-    clear_logs: bool,
-
-    // default state getter
-    state_getter: fn(&Self) -> Option<EvmBackend<Incomming>>,
-}
-
-impl EvmExecutorFactory {
-    pub fn new_for_simulation(bank: &Bank) -> Self {
-        Self::new(bank, Self::take_evm_state_form_simulation)
+impl EvmExecutorContextFactory {
+    pub fn create_for_simulation(bank: &Bank) -> EvmExecutorContext {
+        Self::create(bank, EvmExecutorContextType::Simulation)
     }
 
-    pub fn new_for_execution(bank: &Bank) -> Self {
-        Self::new(bank, Self::take_evm_state_cloned)
+    pub fn create_for_execution(bank: &Bank) -> EvmExecutorContext {
+        Self::create(bank, EvmExecutorContextType::Execution)
     }
 
-    fn new(bank: &Bank, state_getter: fn(&Self) -> Option<EvmBackend<Incomming>>) -> Self {
+    fn create(bank: &Bank, context_type: EvmExecutorContextType) -> EvmExecutorContext {
         let evm = Clone::clone(bank.evm());
         let feature_set = evm_state::executor::FeatureSet::new(
             bank.feature_set
@@ -331,7 +182,7 @@ impl EvmExecutorFactory {
             .feature_set
             .is_active(&solana_sdk::feature_set::velas::clear_logs_on_native_error::id());
 
-        Self {
+        EvmExecutorContext::new(
             evm,
             evm_patch,
             feature_set,
@@ -341,89 +192,7 @@ impl EvmExecutorFactory {
             is_evm_burn_fee_activated,
             evm_new_error_handling,
             clear_logs,
-            state_getter,
-        }
-    }
-
-    pub fn get_executor(&mut self /* chain_id */) -> Option<Executor> {
-        // append to old patch if exist, or create new, from existing evm state
-        self.evm_patch = self.evm_patch.take().or_else(|| (self.state_getter)(self));
-        if let Some(state) = &self.evm_patch {
-            let evm_executor = evm_state::Executor::with_config(
-                state.clone(),
-                evm_state::ChainContext::new(
-                    self.evm.main_chain().blockhashes().get_hashes().clone(), // NOTE: 8kb
-                ),
-                evm_state::EvmConfig::new(
-                    self.evm.main_chain().id(),
-                    self.is_evm_burn_fee_activated,
-                ),
-                self.feature_set,
-            );
-            Some(evm_executor)
-        } else {
-            warn!("Executing evm transaction on already locked bank, ignoring.");
-            None
-        }
-    }
-
-    // On cleanup:
-    // for (chain_id, changed_patches) in evm_factory.destruct() {
-    // if matches!(process_result, Err(TransactionError::InstructionError(..))) {
-    //     evm_patch
-    //         .get_mut(chain_id)
-    //         .expect("Evm patch should exist, on transaction execution.")
-    //         .apply_failed_update(&changed_patches, clear_logs);
-    // } else {
-    //     *evm_patch.get_mut(chain_id).expect("Evm patch should exist, on transaction execution.") = Some(changed_patches);
-    // }
-
-    pub fn cleanup(&mut self, executor: Executor, process_result: &Result<ProcessedMessageInfo>) {
-        let new_patch = executor.deconstruct();
-        // On error save only transaction and increase nonce.
-        if matches!(process_result, Err(TransactionError::InstructionError(..)))
-            && self.evm_new_error_handling
-        {
-            self.evm_patch
-                .as_mut()
-                .expect("Evm patch should exist, on transaction execution.")
-                .apply_failed_update(&new_patch, self.clear_logs);
-        } else {
-            self.evm_patch = Some(new_patch);
-        }
-    }
-
-    pub fn get_patch_cloned(&self) -> Option<EvmPatch> {
-        self.evm_patch.clone()
-    }
-
-    fn take_evm_state_cloned(&self) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
-        match &*self.evm.main_chain().state() {
-            evm_state::EvmState::Incomming(i) => Some(i.clone()),
-            evm_state::EvmState::Committed(_) => {
-                warn!(
-                    "Take evm after freeze, bank_slot={}, bank_is_freeze={}",
-                    self.bank_slot, self.is_bank_frozen
-                );
-                // Return None, so this transaction will fail to execute,
-                // this transaction will be marked as retriable after bank realise that PoH is reached it's max height.
-                None
-            }
-        }
-    }
-
-    fn take_evm_state_form_simulation(
-        &self,
-    ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
-        match &*self.evm.main_chain().state() {
-            evm_state::EvmState::Incomming(i) => Some(i.clone()),
-            evm_state::EvmState::Committed(c) => {
-                debug!(
-                    "Creating cloned evm state for simulation, bank_slot={}, bank_is_freeze={}",
-                    self.bank_slot, self.is_bank_frozen
-                );
-                Some(c.next_incomming(self.unix_timestamp as u64))
-            }
-        }
+            context_type,
+        )
     }
 }
