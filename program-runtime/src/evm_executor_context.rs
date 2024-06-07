@@ -237,8 +237,6 @@ pub enum EvmExecutorContextType {
     Simulation,
 }
 
-// TODO: better naming
-// TODO: add doc-comments
 pub enum PatchStrategy {
     ApplyFailed,
     SetNew,
@@ -330,22 +328,6 @@ impl EvmExecutorContext {
     //         .apply_failed_update(&changed_patches, clear_logs);
     // } else {
     //     *evm_patch.get_mut(chain_id).expect("Evm patch should exist, on transaction execution.") = Some(changed_patches);
-    // }
-
-    // NOTE: old cleanup
-    // pub fn cleanup(&mut self, executor: Executor, process_result: &TXResult<ProcessedMessageInfo>) {
-    //     let new_patch = executor.deconstruct();
-    //     // On error save only transaction and increase nonce.
-    //     if matches!(process_result, Err(TransactionError::InstructionError(..)))
-    //         && self.evm_new_error_handling
-    //     {
-    //         self.evm_patch
-    //             .as_mut()
-    //             .expect("Evm patch should exist, on transaction execution.")
-    //             .apply_failed_update(&new_patch, self.clear_logs);
-    //     } else {
-    //         self.evm_patch = Some(new_patch);
-    //     }
     // }
 
     pub fn cleanup(&mut self, executor: Executor, strategy: PatchStrategy) {

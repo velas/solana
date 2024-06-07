@@ -33,11 +33,11 @@
 //! It offers a high-level API that signs transactions
 //! on behalf of the caller, and a low-level API for when they have
 //! already been signed and verified.
-pub use evm::EvmExecutorContextFactory;
+pub use evm::VelasEVM;
 use evm_state::EvmState;
 use solana_evm_loader_program::processor::EvmProcessor;
 use solana_program_runtime::evm_executor_context::{
-    BlockHashEvm, ChainID, EvmBank, EvmExecutorContext, PatchStrategy,
+    BlockHashEvm, ChainID, EvmBank, EvmExecutorContext,
 };
 use solana_sdk::message::AccountKeys;
 #[allow(deprecated)]
@@ -3743,7 +3743,7 @@ impl Bank {
             true,
             &mut timings,
             Some(&account_overrides),
-            EvmExecutorContextFactory::create_for_simulation(&self),
+            VelasEVM::context_for_simulation(&self),
         );
 
         let post_simulation_accounts = loaded_transactions
@@ -4147,15 +4147,7 @@ impl Bank {
             let executor = Rc::try_unwrap(evm_executor)
                 .expect("Rc should be free after message processing.")
                 .into_inner();
-            let strategy = if matches!(process_result, Err(TransactionError::InstructionError(..)))
-                && evm_executor_context.evm_new_error_handling
-            {
-                PatchStrategy::ApplyFailed
-            } else {
-                PatchStrategy::SetNew
-            };
-
-            evm_executor_context.cleanup(executor, strategy);
+            VelasEVM::cleanup(evm_executor_context, executor, &process_result);
         }
 
         let mut store_missing_executors_time = Measure::start("store_missing_executors_time");
@@ -5639,7 +5631,7 @@ impl Bank {
             enable_log_recording,
             timings,
             None,
-            EvmExecutorContextFactory::create_for_execution(&self),
+            VelasEVM::context_for_execution(&self),
         );
 
         let (last_blockhash, lamports_per_signature) =

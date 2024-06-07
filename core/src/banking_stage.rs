@@ -37,9 +37,8 @@ use {
     solana_program_runtime::timings::ExecuteTimings,
     solana_runtime::{
         bank::{
-            Bank, CommitTransactionCounts, EvmExecutorContextFactory,
-            LoadAndExecuteTransactionsOutput, TransactionBalancesSet, TransactionCheckResult,
-            TransactionExecutionResult,
+            Bank, CommitTransactionCounts, LoadAndExecuteTransactionsOutput,
+            TransactionBalancesSet, TransactionCheckResult, TransactionExecutionResult, VelasEVM,
         },
         bank_forks::BankForks,
         bank_utils,
@@ -1341,7 +1340,7 @@ impl BankingStage {
                     transaction_status_sender.is_some(),
                     &mut execute_and_commit_timings.execute_timings,
                     None, // account_overrides
-                    EvmExecutorContextFactory::create_for_execution(&bank),
+                    VelasEVM::context_for_execution(&bank),
                 )
             },
             (),

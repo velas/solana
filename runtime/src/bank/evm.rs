@@ -1,9 +1,10 @@
-use crate::bank::log_enabled;
-use evm_state::{AccountProvider, FromKey};
+use crate::{bank::log_enabled, message_processor::ProcessedMessageInfo};
+use evm_state::{AccountProvider, Executor, FromKey};
 use log::debug;
 use solana_measure::measure::Measure;
 use solana_program_runtime::evm_executor_context::{
-    BlockHashEvm, EvmBank, EvmExecutorContext, EvmExecutorContextType, MAX_EVM_BLOCKHASHES,
+    BlockHashEvm, EvmBank, EvmExecutorContext, EvmExecutorContextType, PatchStrategy,
+    MAX_EVM_BLOCKHASHES,
 };
 use solana_sdk::{
     feature_set,
@@ -12,7 +13,7 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
     sysvar,
-    transaction::{Result, Transaction},
+    transaction::{Result, Transaction, TransactionError},
 };
 
 use super::Bank;
@@ -145,18 +146,32 @@ impl Bank {
     }
 }
 
-pub struct EvmExecutorContextFactory;
+pub struct VelasEVM;
 
-impl EvmExecutorContextFactory {
-    pub fn create_for_simulation(bank: &Bank) -> EvmExecutorContext {
-        Self::create(bank, EvmExecutorContextType::Simulation)
+impl VelasEVM {
+    pub fn context_for_simulation(bank: &Bank) -> EvmExecutorContext {
+        Self::create_context(bank, EvmExecutorContextType::Simulation)
     }
 
-    pub fn create_for_execution(bank: &Bank) -> EvmExecutorContext {
-        Self::create(bank, EvmExecutorContextType::Execution)
+    pub fn context_for_execution(bank: &Bank) -> EvmExecutorContext {
+        Self::create_context(bank, EvmExecutorContextType::Execution)
     }
 
-    fn create(bank: &Bank, context_type: EvmExecutorContextType) -> EvmExecutorContext {
+    pub fn cleanup(
+        evm_executor_context: &mut EvmExecutorContext,
+        executor: Executor,
+        process_result: &Result<ProcessedMessageInfo>,
+    ) {
+        if matches!(process_result, Err(TransactionError::InstructionError(..)))
+            && evm_executor_context.evm_new_error_handling
+        {
+            evm_executor_context.cleanup(executor, PatchStrategy::ApplyFailed)
+        } else {
+            evm_executor_context.cleanup(executor, PatchStrategy::SetNew)
+        }
+    }
+
+    fn create_context(bank: &Bank, context_type: EvmExecutorContextType) -> EvmExecutorContext {
         let evm = Clone::clone(bank.evm());
         let feature_set = evm_state::executor::FeatureSet::new(
             bank.feature_set
