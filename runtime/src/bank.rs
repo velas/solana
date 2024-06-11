@@ -4090,28 +4090,6 @@ impl Bank {
             None
         };
 
-        // ANCHOR - VELAS
-        // evm_patch = accumulated changes for all txs in batch
-        // evm_state_getter = constructor of this patch if patch is none
-        // Create evm_executor only if evm_state account is locked.
-        // Executor can be used to execute multiple transactions, but currently executor only created for single tx.
-
-        let mut evm_create_executor = Measure::start("evm_create_executor");
-
-        let evm_executor = if tx.message().is_modify_evm_state() {
-            evm_executor_context.get_executor()
-        } else {
-            None
-        };
-
-        evm_create_executor.stop();
-
-        timings.details.create_evm_executor_us += evm_create_executor.as_us();
-        // Create reference counted pointer, to pass evm executor trought InvokeContext.
-        // Without Rc/RefCell we need to somehow provide mutable evm executor from InvokeContext,
-        // keeping InvokeContext free to sharable borrowing for logging purposes.
-        let evm_executor = evm_executor.map(RefCell::new).map(Rc::new);
-
         let (blockhash, lamports_per_signature) = self.last_blockhash_and_lamports_per_signature();
 
         let mut executed_units = 0u64;
@@ -4133,8 +4111,11 @@ impl Bank {
             lamports_per_signature,
             self.load_accounts_data_size(),
             &mut executed_units,
-            evm_executor.clone(), // pass factory as argument instead of executor
-                                  // &mut Factory
+            if tx.message().is_modify_evm_state() {
+                Some(evm_executor_context)
+            } else {
+                None
+            },
         );
         process_message_time.stop();
 
@@ -4143,11 +4124,8 @@ impl Bank {
             process_message_time.as_us()
         );
 
-        if let Some(evm_executor) = evm_executor {
-            let executor = Rc::try_unwrap(evm_executor)
-                .expect("Rc should be free after message processing.")
-                .into_inner();
-            VelasEVM::cleanup(evm_executor_context, executor, &process_result);
+        if tx.message().is_modify_evm_state() {
+            VelasEVM::cleanup(evm_executor_context, &process_result);
         }
 
         let mut store_missing_executors_time = Measure::start("store_missing_executors_time");

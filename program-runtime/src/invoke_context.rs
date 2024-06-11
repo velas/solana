@@ -2,6 +2,7 @@ use {
     crate::{
         accounts_data_meter::AccountsDataMeter,
         compute_budget::ComputeBudget,
+        evm_executor_context::{self, EvmExecutorContext},
         ic_logger_msg, ic_msg,
         log_collector::LogCollector,
         native_loader::NativeLoader,
@@ -216,9 +217,7 @@ pub struct InvokeContext<'a> {
     pub timings: ExecuteDetailsTimings,
     pub blockhash: Hash,
     pub lamports_per_signature: u64,
-    // ANCHOR - VELAS
-    // &mut instead of Rc<RefCell<>>
-    evm_executor: Option<Rc<RefCell<evm_state::Executor>>>, // executor = TrieDb + [Hash]
+    pub evm_executor_context: Option<&'a mut EvmExecutorContext>,
 }
 
 impl<'a> InvokeContext<'a> {
@@ -235,7 +234,7 @@ impl<'a> InvokeContext<'a> {
         blockhash: Hash,
         lamports_per_signature: u64,
         initial_accounts_data_len: u64,
-        evm_executor: Option<Rc<RefCell<evm_state::Executor>>>,
+        evm_executor_context: Option<&'a mut EvmExecutorContext>,
     ) -> Self {
         Self {
             transaction_context,
@@ -254,14 +253,15 @@ impl<'a> InvokeContext<'a> {
             timings: ExecuteDetailsTimings::default(),
             blockhash,
             lamports_per_signature,
-            evm_executor,
+            evm_executor_context,
         }
     }
 
     /// Take evm executor from context, removing the context, panic if evm executor wasnt in context.
     pub fn deconstruct_evm(self) -> Option<evm_state::Executor> {
-        self.evm_executor
-            .and_then(|rc| Rc::try_unwrap(rc).ok().map(|i| i.into_inner()))
+        // self.evm_executor
+        // .and_then(|rc| Rc::try_unwrap(rc).ok().map(|i| i.into_inner()))
+        None
     }
 
     pub fn new_mock(
@@ -341,7 +341,7 @@ impl<'a> InvokeContext<'a> {
             Hash::default(),
             0,
             0,
-            Some(Rc::new(RefCell::new(evm_executor))),
+            None, // TODO: CREATE Some(evm_executor_mock_context)
         )
     }
 
@@ -1063,8 +1063,10 @@ impl<'a> InvokeContext<'a> {
         Err(InstructionError::UnsupportedProgramId)
     }
 
-    pub fn get_evm_executor(&self) -> Option<Rc<RefCell<evm_state::Executor>>> {
-        self.evm_executor.clone()
+    pub fn get_evm_executor(&mut self) -> Option<Rc<RefCell<evm_state::Executor>>> {
+        self.evm_executor_context
+            .as_mut()
+            .and_then(|c| c.get_executor())
     }
 
     pub fn get_parent_caller(&self) -> Option<&Pubkey> {

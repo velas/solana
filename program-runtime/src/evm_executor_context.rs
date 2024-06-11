@@ -1,4 +1,4 @@
-use std::{fmt, marker::PhantomData};
+use std::{cell::RefCell, fmt, marker::PhantomData, rc::Rc};
 
 use serde::{
     de::{SeqAccess, Visitor},
@@ -242,11 +242,17 @@ pub enum PatchStrategy {
     SetNew,
 }
 
+//
+// 1. Init state: in solana::Bank::evm -> EvmExecutorContext::new()
+// 2. State for tx_batch = evm_patch::new(init_state)
+// 3. intermediate state for one tx = evm_executor::new(evm_patch)
 pub struct EvmExecutorContext {
     evm: EvmBank,
 
-    // evm_patches: HashMap<ChainID, EvmPatch>,
+    // TODO: evm_patches: HashMap<ChainID, EvmPatch>,
     evm_patch: Option<EvmPatch>,
+
+    active_executor: Option<Rc<RefCell<Executor>>>,
 
     // extract into struct
     feature_set: evm_state::executor::FeatureSet,
@@ -266,11 +272,14 @@ pub struct EvmExecutorContext {
     context_type: EvmExecutorContextType,
 }
 
+pub type RefCellLocked = ();
+
 impl EvmExecutorContext {
     pub fn new(
+        // TODO: EvmBank should be shared with solana::Bank
         evm: EvmBank,
-        evm_patch: Option<EvmPatch>,
         feature_set: evm_state::executor::FeatureSet,
+        // NOTE: available from InvokeContext
         unix_timestamp: i64,
         bank_slot: Slot,
         is_bank_frozen: bool,
@@ -281,7 +290,7 @@ impl EvmExecutorContext {
     ) -> Self {
         Self {
             evm,
-            evm_patch,
+            evm_patch: None,
             feature_set,
             unix_timestamp,
             bank_slot,
@@ -290,11 +299,13 @@ impl EvmExecutorContext {
             evm_new_error_handling,
             clear_logs,
             context_type,
+            active_executor: None,
         }
     }
 
-    pub fn get_executor(&mut self /* chain_id */) -> Option<Executor> {
+    pub fn get_executor(&mut self /* chain_id */) -> Option<Rc<RefCell<Executor>>> {
         // append to old patch if exist, or create new, from existing evm state
+        // TODO: Can be inlined?
         self.evm_patch = self.evm_patch.take().or_else(|| match self.context_type {
             EvmExecutorContextType::Execution => self.take_evm_state_cloned(),
             EvmExecutorContextType::Simulation => self.take_evm_state_for_simulation(),
@@ -312,7 +323,11 @@ impl EvmExecutorContext {
                 ),
                 self.feature_set,
             );
-            Some(evm_executor)
+
+            let evm_executor = Some(Rc::new(RefCell::new(evm_executor)));
+            self.active_executor = evm_executor.clone();
+
+            evm_executor
         } else {
             warn!("Executing evm transaction on already locked bank, ignoring.");
             None
@@ -330,7 +345,19 @@ impl EvmExecutorContext {
     //     *evm_patch.get_mut(chain_id).expect("Evm patch should exist, on transaction execution.") = Some(changed_patches);
     // }
 
-    pub fn cleanup(&mut self, executor: Executor, strategy: PatchStrategy) {
+    // TODO: Return Result<(), E>. Let caller decide how to unwrap.
+    /// # Panics
+    pub fn cleanup(&mut self, strategy: PatchStrategy) {
+        let executor: Executor = {
+            let executor = self
+                .active_executor
+                .take()
+                .expect("Executor was not created, nothing to deconstruct");
+            Rc::try_unwrap(executor)
+                .map(|e| e.into_inner())
+                .expect("Reference to Active Executor was not freed")
+        };
+
         let new_patch = executor.deconstruct();
         // On error save only transaction and increase nonce.
         match strategy {

@@ -160,7 +160,6 @@ impl ExecuteAccessoryTimings {
 pub struct ExecuteDetailsTimings {
     pub serialize_us: u64,
     pub create_vm_us: u64,
-    pub create_evm_executor_us: u64,
     pub execute_us: u64,
     pub deserialize_us: u64,
     pub get_or_create_executor_us: u64,
@@ -179,7 +178,6 @@ impl ExecuteDetailsTimings {
     pub fn accumulate(&mut self, other: &ExecuteDetailsTimings) {
         saturating_add_assign!(self.serialize_us, other.serialize_us);
         saturating_add_assign!(self.create_vm_us, other.create_vm_us);
-        saturating_add_assign!(self.create_evm_executor_us, other.create_evm_executor_us);
         saturating_add_assign!(self.execute_us, other.execute_us);
         saturating_add_assign!(self.deserialize_us, other.deserialize_us);
         saturating_add_assign!(

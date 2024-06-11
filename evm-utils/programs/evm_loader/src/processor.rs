@@ -44,6 +44,32 @@ impl EvmProcessor {
         data: &[u8],
         invoke_context: &mut InvokeContext,
     ) -> Result<(), InstructionError> {
+        // processor gets access to factory from invoke context
+        let evm_executor =
+            if let Some(evm_executor) = invoke_context.get_evm_executor(/* evm_state_account */) {
+                evm_executor
+            } else {
+                ic_msg!(
+                    invoke_context,
+                    "Invoke context didn't provide evm executor."
+                );
+                return Err(EvmError::EvmExecutorNotFound.into());
+            };
+        // bind variable to increase lifetime of temporary RefCell borrow.
+        // TODO: refactor me
+        let mut evm_executor_borrow;
+        // evm executor cannot be borrowed, because it not exist in invoke context, or borrowing failed.
+        let executor = if let Ok(evm_executor) = evm_executor.try_borrow_mut() {
+            evm_executor_borrow = evm_executor;
+            evm_executor_borrow.deref_mut()
+        } else {
+            ic_msg!(
+                invoke_context,
+                "Recursive cross-program evm execution not enabled."
+            );
+            return Err(EvmError::RecursiveCrossExecution.into());
+        };
+
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context)?;
 
         let cross_execution_enabled = invoke_context
@@ -71,31 +97,6 @@ impl EvmProcessor {
             ic_msg!(invoke_context, "Cross-Program evm execution not enabled.");
             return Err(EvmError::CrossExecutionNotEnabled.into());
         }
-
-        // processor gets access to factory from invoke context
-        let evm_executor =
-            if let Some(evm_executor) = invoke_context.get_evm_executor(/* evm_state_account */) {
-                evm_executor
-            } else {
-                ic_msg!(
-                    invoke_context,
-                    "Invoke context didn't provide evm executor."
-                );
-                return Err(EvmError::EvmExecutorNotFound.into());
-            };
-        // bind variable to increase lifetime of temporary RefCell borrow.
-        let mut evm_executor_borrow;
-        // evm executor cannot be borrowed, because it not exist in invoke context, or borrowing failed.
-        let executor = if let Ok(evm_executor) = evm_executor.try_borrow_mut() {
-            evm_executor_borrow = evm_executor;
-            evm_executor_borrow.deref_mut()
-        } else {
-            ic_msg!(
-                invoke_context,
-                "Recursive cross-program evm execution not enabled."
-            );
-            return Err(EvmError::RecursiveCrossExecution.into());
-        };
 
         let mut borsh_serialization_used = false;
         let ix = match (borsh_serialization_enabled, data.split_first()) {

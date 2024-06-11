@@ -1,5 +1,5 @@
 use crate::{bank::log_enabled, message_processor::ProcessedMessageInfo};
-use evm_state::{AccountProvider, Executor, FromKey};
+use evm_state::{AccountProvider, FromKey};
 use log::debug;
 use solana_measure::measure::Measure;
 use solana_program_runtime::evm_executor_context::{
@@ -157,17 +157,18 @@ impl VelasEVM {
         Self::create_context(bank, EvmExecutorContextType::Execution)
     }
 
+    // TODO: Return Result<(), E>. Let caller decide how to unwrap.
+    /// # Panics
     pub fn cleanup(
         evm_executor_context: &mut EvmExecutorContext,
-        executor: Executor,
         process_result: &Result<ProcessedMessageInfo>,
     ) {
         if matches!(process_result, Err(TransactionError::InstructionError(..)))
             && evm_executor_context.evm_new_error_handling
         {
-            evm_executor_context.cleanup(executor, PatchStrategy::ApplyFailed)
+            evm_executor_context.cleanup(PatchStrategy::ApplyFailed)
         } else {
-            evm_executor_context.cleanup(executor, PatchStrategy::SetNew)
+            evm_executor_context.cleanup(PatchStrategy::SetNew)
         }
     }
 
@@ -186,7 +187,6 @@ impl VelasEVM {
         let bank_slot = bank.slot();
         let is_bank_frozen = bank.is_frozen();
         let is_evm_burn_fee_activated = bank.evm_burn_fee_activated();
-        let evm_patch = None;
 
         // TODO: hardcode this feature to `true`
         let evm_new_error_handling = bank
@@ -199,7 +199,6 @@ impl VelasEVM {
 
         EvmExecutorContext::new(
             evm,
-            evm_patch,
             feature_set,
             unix_timestamp,
             bank_slot,

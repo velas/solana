@@ -3,6 +3,7 @@ use {
     solana_measure::measure::Measure,
     solana_program_runtime::{
         compute_budget::ComputeBudget,
+        evm_executor_context::EvmExecutorContext,
         invoke_context::{BuiltinProgram, Executors, InvokeContext},
         log_collector::LogCollector,
         sysvar_cache::SysvarCache,
@@ -73,8 +74,7 @@ impl MessageProcessor {
         lamports_per_signature: u64,
         current_accounts_data_len: u64,
         accumulated_consumed_units: &mut u64,
-        evm_executor: Option<Rc<RefCell<evm_state::Executor>>>,
-        // &mut Factory
+        evm_executor_context: Option<&mut EvmExecutorContext>,
     ) -> Result<ProcessedMessageInfo, TransactionError> {
         let mut invoke_context = InvokeContext::new(
             transaction_context,
@@ -88,7 +88,7 @@ impl MessageProcessor {
             blockhash,
             lamports_per_signature,
             current_accounts_data_len,
-            evm_executor,
+            evm_executor_context,
         );
 
         debug_assert_eq!(program_indices.len(), message.instructions().len());
@@ -185,9 +185,14 @@ impl MessageProcessor {
                 result
             };
 
+            // Cleanup?
+
             result
                 .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
         }
+
+        // Cleanup?
+
         Ok(ProcessedMessageInfo {
             accounts_data_len_delta: invoke_context.get_accounts_data_meter().delta(),
         })
