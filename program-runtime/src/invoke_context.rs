@@ -2,7 +2,7 @@ use {
     crate::{
         accounts_data_meter::AccountsDataMeter,
         compute_budget::ComputeBudget,
-        evm_executor_context::{self, EvmExecutorContext},
+        evm_executor_context::EvmExecutorContext,
         ic_logger_msg, ic_msg,
         log_collector::LogCollector,
         native_loader::NativeLoader,
@@ -257,6 +257,7 @@ impl<'a> InvokeContext<'a> {
         }
     }
 
+    // TODO: used in tests, remove or refactor
     /// Take evm executor from context, removing the context, panic if evm executor wasnt in context.
     pub fn deconstruct_evm(self) -> Option<evm_state::Executor> {
         // self.evm_executor

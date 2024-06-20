@@ -49,6 +49,9 @@ pub enum EvmError {
     #[snafu(display("Failed to write data into storage account."))]
     WriteStorageFailed,
 
+    #[snafu(display("Failed to serialize data into account."))]
+    SerializationError,
+
     #[snafu(display("Failed to deserialize data from account."))]
     DeserializationError,
 
@@ -66,6 +69,18 @@ pub enum EvmError {
 
     #[snafu(display("Precompile error"))]
     PrecompileError,
+
+    #[snafu(display("EVM Subchain Config data Account is already created."))]
+    EvmSubchainConfigAlreadyExists,
+
+    #[snafu(display("Deposit is required to create EVM Subchain."))]
+    EvmSubchainDepositRequired,
+
+    #[snafu(display("Failed to allocate subchain account"))]
+    SubchainStateAllocationFailed,
+
+    #[snafu(display("Failed to pay for subchain account"))]
+    FailedToPayForSubchainInit,
 }
 
 impl<E> DecodeError<E> for EvmError {

@@ -4,28 +4,35 @@ use std::ops::DerefMut;
 
 use super::account_structure::AccountStructure;
 use super::instructions::{
-    EvmBigTransaction, EvmInstruction, ExecuteTransaction, FeePayerType,
-    EVM_INSTRUCTION_BORSH_PREFIX,
+    EvmBigTransaction, EvmInstruction, EvmSubChain, ExecuteTransaction, FeePayerType,
+    SubchainConfig, EVM_INSTRUCTION_BORSH_PREFIX,
 };
 use super::precompiles;
 use super::scope::*;
 use evm_state::U256;
 use log::*;
 
-use borsh::BorshDeserialize;
+use borsh::{BorshDeserialize, BorshSerialize};
 use evm::{gweis_to_lamports, Executor, ExitReason};
 use evm_state::ExecutionResult;
 use serde::de::DeserializeOwned;
-use solana_program_runtime::ic_msg;
-use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::account::{AccountSharedData, ReadableAccount, WritableAccount};
-use solana_sdk::instruction::InstructionError;
-use solana_sdk::{keyed_account::KeyedAccount, program_utils::limited_deserialize};
+use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
+use solana_sdk::{
+    account::{AccountSharedData, ReadableAccount, WritableAccount},
+    instruction::InstructionError,
+    keyed_account::KeyedAccount,
+    native_token::LAMPORTS_PER_VLX,
+    program_utils::limited_deserialize,
+    pubkey::Pubkey,
+    system_instruction,
+};
 
 use super::error::EvmError;
 use super::tx_chunks::TxChunks;
 
 pub const BURN_ADDR: evm_state::H160 = evm_state::H160::zero();
+
+const SUBCHAIN_CREATION_DEPOSIT_VLX: u64 = 1_000_000;
 
 /// Return the next AccountInfo or a NotEnoughAccountKeys error
 pub fn next_account_info<'a, 'b, I: Iterator<Item = &'a KeyedAccount<'b>>>(
@@ -34,6 +41,26 @@ pub fn next_account_info<'a, 'b, I: Iterator<Item = &'a KeyedAccount<'b>>>(
     iter.next().ok_or(InstructionError::NotEnoughAccountKeys)
 }
 
+//
+// Big Tx Storage Account:
+// Owner: evm_program
+// signer: true (external or internal not evm program)
+//
+// 2. Custom EvmState PDA account:
+// Owner: evm_program
+// Seed: ("evm_state", chain_id)
+// data: config
+// lamports: >= constant (1m) - used for fee
+// signer: -
+// number: < storage
+
+// priority:
+// [ native -> evm_program ] -> evm_state -> custom_evm_state -> storage_evm_state
+// new_calls  (fixed_prefix):
+// - execute_subchain:
+// chain_id + ..execute_tx
+// - create_account:
+//
 #[derive(Default, Debug, Clone)]
 pub struct EvmProcessor;
 
@@ -44,34 +71,6 @@ impl EvmProcessor {
         data: &[u8],
         invoke_context: &mut InvokeContext,
     ) -> Result<(), InstructionError> {
-        // processor gets access to factory from invoke context
-        let evm_executor =
-            if let Some(evm_executor) = invoke_context.get_evm_executor(/* evm_state_account */) {
-                evm_executor
-            } else {
-                ic_msg!(
-                    invoke_context,
-                    "Invoke context didn't provide evm executor."
-                );
-                return Err(EvmError::EvmExecutorNotFound.into());
-            };
-        // bind variable to increase lifetime of temporary RefCell borrow.
-        // TODO: refactor me
-        let mut evm_executor_borrow;
-        // evm executor cannot be borrowed, because it not exist in invoke context, or borrowing failed.
-        let executor = if let Ok(evm_executor) = evm_executor.try_borrow_mut() {
-            evm_executor_borrow = evm_executor;
-            evm_executor_borrow.deref_mut()
-        } else {
-            ic_msg!(
-                invoke_context,
-                "Recursive cross-program evm execution not enabled."
-            );
-            return Err(EvmError::RecursiveCrossExecution.into());
-        };
-
-        let accounts = Self::build_account_structure(first_keyed_account, invoke_context)?;
-
         let cross_execution_enabled = invoke_context
             .feature_set
             .is_active(&solana_sdk::feature_set::velas::evm_cross_execution::id());
@@ -107,6 +106,36 @@ impl EvmProcessor {
             }
             _ => limited_deserialize(data)?,
         };
+
+        // processor gets access to factory from invoke context
+        let evm_executor =
+            if let Some(evm_executor) = invoke_context.get_evm_executor(/* evm_state_account */) {
+                evm_executor
+            } else {
+                ic_msg!(
+                    invoke_context,
+                    "Invoke context didn't provide evm executor."
+                );
+                return Err(EvmError::EvmExecutorNotFound.into());
+            };
+        // bind variable to increase lifetime of temporary RefCell borrow.
+        // TODO: refactor me
+        let mut evm_executor_borrow;
+        // evm executor cannot be borrowed, because it not exist in invoke context, or borrowing failed.
+        let executor = if let Ok(evm_executor) = evm_executor.try_borrow_mut() {
+            evm_executor_borrow = evm_executor;
+            evm_executor_borrow.deref_mut()
+        } else {
+            ic_msg!(
+                invoke_context,
+                "Recursive cross-program evm execution not enabled."
+            );
+            return Err(EvmError::RecursiveCrossExecution.into());
+        };
+
+        // TODO: reduce Double create in `EvmInstruction::EvmSubchain`.
+        let accounts = Self::build_account_structure(first_keyed_account, invoke_context)?;
+
         trace!("Run evm exec with ix = {:?}.", ix);
         let result = match ix {
             EvmInstruction::EvmBigTransaction(big_tx) => {
@@ -137,6 +166,14 @@ impl EvmProcessor {
                 fee_type,
                 borsh_serialization_used,
             ),
+            EvmInstruction::EvmSubchain(evm_subchain_ix) => match evm_subchain_ix {
+                EvmSubChain::CreateAccount { id, config } => self.create_evm_subchain_account(
+                    invoke_context,
+                    first_keyed_account,
+                    id,
+                    config,
+                ),
+            },
         };
 
         if register_swap_tx_in_evm {
@@ -566,6 +603,17 @@ impl EvmProcessor {
             );
             return Err(EvmError::MissingRequiredSignature);
         }
+
+        // TODO: add check that `storage_account` is not PDA (not multichain account)
+        // Probably check is not needed since we already know it is a signer thus it can not be a PDA
+        // if !storage_account.unsigned_key().is_on_curve() {
+        //     ic_msg!(
+        //         invoke_context,
+        //         "EvmBigTransaction: Storage should not be a PDA"
+        //     );
+        //     return Err(EvmError::IntroduceSomeNewErrorForThatCase);
+        // }
+
         storage_account
             .try_account_ref_mut()
             .map_err(|_| EvmError::BorrowingFailed)
@@ -707,6 +755,118 @@ impl EvmProcessor {
                 "Sender didnt give his account, ignoring fee refund.",
             );
         }
+
+        Ok(())
+    }
+
+    fn create_evm_subchain_account(
+        &self,
+        invoke_context: &mut InvokeContext,
+        first_keyed_account: usize,
+        id: u64,
+        config: SubchainConfig,
+    ) -> Result<(), EvmError> {
+        let (evm_subchain_config_pda, _bump_seed) = Pubkey::find_program_address(
+            &[b"evm_subchain", &id.to_be_bytes()],
+            &solana_sdk::evm_loader::ID,
+        );
+
+        let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
+
+        // Check if signer has enough balance to create subchain account.
+        let whale = accounts.find_signer().ok_or_else(|| {
+            ic_msg!(invoke_context, "Signer is required");
+            EvmError::MissingRequiredSignature
+        })?;
+
+        if whale
+            .try_account_ref()
+            .map_err(|_| EvmError::BorrowingFailed)?
+            .lamports()
+            > SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX
+        {
+            ic_msg!(
+                invoke_context,
+                "Deposit of {} VLX is required to create EVM Subchain",
+                SUBCHAIN_CREATION_DEPOSIT_VLX
+            );
+            Err(EvmError::EvmSubchainDepositRequired)?
+        }
+
+        // Check if `storage` is in `keyed_accounts`
+        let evm_subchain_cfg = accounts
+            .find_user(&evm_subchain_config_pda)
+            .ok_or_else(|| {
+                ic_msg!(
+                    invoke_context,
+                    "EVM Subchain Config data Account is not found in Meta"
+                );
+                EvmError::MissingAccount
+            })?;
+
+        // Check if account is already created
+        let evm_subchain_cfg_borrow = evm_subchain_cfg
+            .try_account_ref()
+            .map_err(|_| EvmError::BorrowingFailed)?;
+
+        if !evm_subchain_cfg_borrow.data().is_empty() || evm_subchain_cfg_borrow.lamports() > 0 {
+            ic_msg!(
+                invoke_context,
+                "EVM Subchain Config data Account is already created"
+            );
+            Err(EvmError::EvmSubchainConfigAlreadyExists)?
+        }
+
+        let whale_pubkey = *whale.unsigned_key();
+        let evm_main_state = *accounts.evm.unsigned_key();
+        let evm_subchain_cfg_pubkey = *evm_subchain_cfg.unsigned_key();
+
+        drop(evm_subchain_cfg_borrow);
+
+        // Create subchain account
+        invoke_context
+            .native_invoke(
+                system_instruction::allocate(
+                    &evm_subchain_config_pda,
+                    std::mem::size_of::<SubchainConfig>() as u64,
+                ),
+                &[whale_pubkey],
+            )
+            .map_err(|e| {
+                ic_msg!(invoke_context, "Failed to allocate subchain account: {}", e);
+                EvmError::SubchainStateAllocationFailed
+            })?;
+
+        // Take whale's money
+        invoke_context
+            .native_invoke(
+                system_instruction::transfer(
+                    &whale_pubkey,
+                    &evm_main_state,
+                    SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX,
+                ),
+                &[whale_pubkey],
+            )
+            .map_err(|e| {
+                ic_msg!(invoke_context, "Failed to pay for subchain init: {}", e);
+                EvmError::FailedToPayForSubchainInit
+            })?;
+
+        // Write config Into subchain account
+        let mut config_ser =
+            Vec::with_capacity(solana_sdk::borsh::get_packed_len::<SubchainConfig>());
+        config
+            .serialize(&mut config_ser)
+            .map_err(|_| EvmError::SerializationError)?;
+        invoke_context
+            .get_keyed_accounts()
+            .unwrap() // NOTE: safe to unwrap
+            .into_iter()
+            .find(|acc| acc.unsigned_key() == &evm_subchain_cfg_pubkey)
+            .unwrap() // NOTE: safe to unwrap
+            .try_account_ref_mut()
+            .map_err(|_| EvmError::BorrowingFailed)?
+            .set_data(config_ser);
 
         Ok(())
     }

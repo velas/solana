@@ -5,7 +5,7 @@ use bincode::deserialize;
 use evm_rpc::RPCTransaction;
 use serde_json::json;
 use solana_evm_loader_program::instructions::{
-    EvmBigTransaction, EvmInstruction, ExecuteTransaction,
+    EvmBigTransaction, EvmInstruction, EvmSubChain, ExecuteTransaction,
 };
 use solana_sdk::{instruction::CompiledInstruction, message::AccountKeys};
 
@@ -174,6 +174,15 @@ pub fn parse_evm(
                 info,
             })
         }
+        EvmInstruction::EvmSubchain(evm_subchain) => match evm_subchain {
+            EvmSubChain::CreateAccount { id, config } => Ok(ParsedInstructionEnum {
+                instruction_type: "evmSubchainCreateAccount".to_string(),
+                info: json!({
+                    "id": id,
+                    "config": config
+                }),
+            }),
+        },
     }
 }
 

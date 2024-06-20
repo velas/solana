@@ -1,7 +1,8 @@
 use super::scope::*;
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
 use evm_state::{Address, Transaction, UnsignedTransaction};
 use serde::{Deserialize, Serialize};
+use solana_program_runtime::evm_executor_context::ChainID;
 
 pub mod v0;
 
@@ -163,6 +164,65 @@ pub enum EvmInstruction {
         tx: ExecuteTransaction,
         fee_type: FeePayerType,
     },
+
+    EvmSubchain(EvmSubChain),
+}
+
+#[derive(
+    BorshSerialize,
+    BorshDeserialize,
+    BorshSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
+pub enum Hardfork {
+    Istanbul,
+}
+
+#[derive(
+    BorshSerialize,
+    BorshDeserialize,
+    BorshSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
+pub struct SubchainConfig {
+    pub version: u8,
+    pub hardfork: Hardfork,
+    // pub last_hashes: [H256; 256],
+}
+
+#[derive(
+    BorshSerialize,
+    BorshDeserialize,
+    // TODO: add schema generation custom command
+    // BorshSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
+pub enum EvmSubChain {
+    /// Allocate Data Account for newly created EVM Subchain
+    CreateAccount { id: ChainID, config: SubchainConfig },
+    // Execute EVM Subchain Transaction
+    // ExecuteTx {},
 }
 
 impl EvmInstruction {
@@ -279,6 +339,10 @@ impl From<EvmInstruction> for v0::EvmInstruction {
                     }
                 }
             },
+            EvmInstruction::EvmSubchain(_) => {
+                // TODO: implement try_{into, from}
+                panic!("EvmSubChain instruction should not be used in v0")
+            }
         }
     }
 }

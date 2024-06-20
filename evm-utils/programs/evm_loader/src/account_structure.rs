@@ -31,7 +31,7 @@ impl<'a> AccountStructure<'a> {
         self.users.first()
     }
 
-    /// Find user by its public key.
+    /// Find user by its public key and account index.
     pub fn find_user(&self, key: &Pubkey) -> Option<&KeyedAccount> {
         self.users.iter().find(|keyed| keyed.unsigned_key() == key)
     }
@@ -75,6 +75,10 @@ impl<'a> AccountStructure<'a> {
                 u.try_account_ref_mut()
                     .map_err(|_| EvmError::BorrowingFailed)
             })
+    }
+
+    pub fn find_signer(&self) -> Option<&KeyedAccount> {
+        self.users.iter().find(|keyed| keyed.signer_key().is_some())
     }
 
     /// Create AccountStructure for testing purposes, with random accounts.

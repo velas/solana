@@ -155,6 +155,7 @@ impl EvmChain {
             .expect("EVM Blockhashes RwLock was poisoned")
     }
 
+    // TODO: do not expose WriteGuard, do setter
     /// EVM Blockhashes Write Lock Guard
     pub fn blockhashes_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, BlockHashEvm> {
         self.evm_blockhashes
@@ -169,6 +170,7 @@ impl EvmChain {
             .expect("EVM Blockhashes RwLock was poisoned")
     }
 
+    // TODO: do not expose WriteGuard, do setter
     /// EVM Blockhashes Write Lock Guard
     pub fn changed_list_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, ChangedList> {
         self.evm_changed_list
@@ -304,6 +306,11 @@ impl EvmExecutorContext {
     }
 
     pub fn get_executor(&mut self /* chain_id */) -> Option<Rc<RefCell<Executor>>> {
+        if self.active_executor.is_some() {
+            warn!("not a warn: getting active executor");
+            return self.active_executor.clone();
+        }
+
         // append to old patch if exist, or create new, from existing evm state
         // TODO: Can be inlined?
         self.evm_patch = self.evm_patch.take().or_else(|| match self.context_type {

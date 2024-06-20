@@ -96,9 +96,8 @@ impl Bank {
             self.evm.main_chain().state().block_number()
         );
 
-        let mut w_evm_blockhash_queue = self.evm.main_chain().blockhashes_write();
-
         if let Some((hash, changes)) = hash {
+            let mut w_evm_blockhash_queue = self.evm.main_chain().blockhashes_write();
             *self.evm.main_chain().changed_list_write() = Some((old_root, changes));
 
             self.evm

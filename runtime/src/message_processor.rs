@@ -185,13 +185,9 @@ impl MessageProcessor {
                 result
             };
 
-            // Cleanup?
-
             result
                 .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
         }
-
-        // Cleanup?
 
         Ok(ProcessedMessageInfo {
             accounts_data_len_delta: invoke_context.get_accounts_data_meter().delta(),
