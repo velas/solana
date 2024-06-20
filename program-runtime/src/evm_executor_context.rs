@@ -306,10 +306,10 @@ impl EvmExecutorContext {
     }
 
     pub fn get_executor(&mut self /* chain_id */) -> Option<Rc<RefCell<Executor>>> {
-        if self.active_executor.is_some() {
-            warn!("not a warn: getting active executor");
-            return self.active_executor.clone();
-        }
+        // if self.active_executor.is_some() {
+        //     warn!("not a warn: getting active executor");
+        //     return self.active_executor.clone();
+        // }
 
         // append to old patch if exist, or create new, from existing evm state
         // TODO: Can be inlined?
@@ -339,6 +339,13 @@ impl EvmExecutorContext {
             warn!("Executing evm transaction on already locked bank, ignoring.");
             None
         }
+    }
+
+    // for test purposes
+    pub fn take_executor(&mut self) -> Option<Executor> {
+        self.active_executor
+            .take()
+            .and_then(|rc| Rc::try_unwrap(rc).ok().map(|i| i.into_inner()))
     }
 
     // TODO: On cleanup:

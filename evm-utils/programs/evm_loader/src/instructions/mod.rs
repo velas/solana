@@ -221,8 +221,8 @@ pub struct SubchainConfig {
 pub enum EvmSubChain {
     /// Allocate Data Account for newly created EVM Subchain
     CreateAccount { id: ChainID, config: SubchainConfig },
-    // Execute EVM Subchain Transaction
-    // ExecuteTx {},
+    /// Execute EVM Subchain Transaction
+    ExecuteTx { id: ChainID, tx: Transaction },
 }
 
 impl EvmInstruction {

@@ -20,7 +20,7 @@ pub type Gas = U256;
 
 const UNSIGNED_TX_MARKER: u8 = 0x1;
 
-/// Etherium transaction.
+/// Ethereum transaction.
 #[derive(
     BorshSerialize,
     BorshDeserialize,
@@ -89,8 +89,8 @@ impl Transaction {
     }
 
     //
-    // R and S is a u256, and should be encoded as scalar.
-    // Remove this method when rpl_append will be fixed.
+    // R and S are U256, and should be encoded as scalar.
+    // Remove this method when rpl_append is fixed.
     //
     fn rlp_append_consistent(&self, stream: &mut RlpStream) {
         let r = U256::from_big_endian(self.signature.r.as_bytes());

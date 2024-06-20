@@ -257,12 +257,8 @@ impl<'a> InvokeContext<'a> {
         }
     }
 
-    // TODO: used in tests, remove or refactor
-    /// Take evm executor from context, removing the context, panic if evm executor wasnt in context.
     pub fn deconstruct_evm(self) -> Option<evm_state::Executor> {
-        // self.evm_executor
-        // .and_then(|rc| Rc::try_unwrap(rc).ok().map(|i| i.into_inner()))
-        None
+        self.evm_executor_context.and_then(|e| e.take_executor())
     }
 
     pub fn new_mock(
@@ -308,7 +304,7 @@ impl<'a> InvokeContext<'a> {
     pub fn new_mock_evm(
         transaction_context: &'a mut TransactionContext,
         builtin_programs: &'a [BuiltinProgram],
-        evm_executor: evm_state::Executor,
+        evm_executor_context: &'a mut EvmExecutorContext,
     ) -> Self {
         let mut sysvar_cache = SysvarCache::default();
         sysvar_cache.fill_missing_entries(|pubkey| {
@@ -342,7 +338,7 @@ impl<'a> InvokeContext<'a> {
             Hash::default(),
             0,
             0,
-            None, // TODO: CREATE Some(evm_executor_mock_context)
+            Some(evm_executor_context),
         )
     }
 

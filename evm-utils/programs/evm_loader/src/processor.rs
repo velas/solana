@@ -16,6 +16,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use evm::{gweis_to_lamports, Executor, ExitReason};
 use evm_state::ExecutionResult;
 use serde::de::DeserializeOwned;
+use solana_program_runtime::evm_executor_context::ChainID;
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount, WritableAccount},
@@ -173,6 +174,7 @@ impl EvmProcessor {
                     id,
                     config,
                 ),
+                EvmSubChain::ExecuteTx { id, tx } => self.process_execute_subchain_tx(id, tx),
             },
         };
 
@@ -235,7 +237,7 @@ impl EvmProcessor {
 
         // FeePayerType::Native is possible only in new serialization format
         if fee_type.is_native() && sender.is_none() {
-            ic_msg!(invoke_context, "Fee payer is native but no sender providen",);
+            ic_msg!(invoke_context, "Fee payer is native but no sender provided",);
             return Err(EvmError::MissingRequiredSignature);
         }
 
@@ -799,7 +801,7 @@ impl EvmProcessor {
             .ok_or_else(|| {
                 ic_msg!(
                     invoke_context,
-                    "EVM Subchain Config data Account is not found in Meta"
+                    "EVM Subchain State Account is not found in Meta"
                 );
                 EvmError::MissingAccount
             })?;
@@ -812,7 +814,8 @@ impl EvmProcessor {
         if !evm_subchain_cfg_borrow.data().is_empty() || evm_subchain_cfg_borrow.lamports() > 0 {
             ic_msg!(
                 invoke_context,
-                "EVM Subchain Config data Account is already created"
+                "EVM Subchain State Account is already created for Chain ID = {}",
+                id
             );
             Err(EvmError::EvmSubchainConfigAlreadyExists)?
         }
@@ -824,16 +827,25 @@ impl EvmProcessor {
         drop(evm_subchain_cfg_borrow);
 
         // Create subchain account
+        let create_account_ix = system_instruction::create_account(
+            &whale_pubkey,
+            &evm_subchain_cfg_pubkey,
+            1 * LAMPORTS_PER_VLX,
+            std::mem::size_of::<SubchainConfig>() as u64,
+            &evm_main_state,
+        );
+        // system_instruction::allocate(
+        //     &evm_subchain_config_pda,
+        //     std::mem::size_of::<SubchainConfig>() as u64,
+        // )
         invoke_context
-            .native_invoke(
-                system_instruction::allocate(
-                    &evm_subchain_config_pda,
-                    std::mem::size_of::<SubchainConfig>() as u64,
-                ),
-                &[whale_pubkey],
-            )
+            .native_invoke(create_account_ix, &[whale_pubkey])
             .map_err(|e| {
-                ic_msg!(invoke_context, "Failed to allocate subchain account: {}", e);
+                ic_msg!(
+                    invoke_context,
+                    "Failed to allocate Subchain State Account: {}",
+                    e
+                );
                 EvmError::SubchainStateAllocationFailed
             })?;
 
@@ -848,7 +860,11 @@ impl EvmProcessor {
                 &[whale_pubkey],
             )
             .map_err(|e| {
-                ic_msg!(invoke_context, "Failed to pay for subchain init: {}", e);
+                ic_msg!(
+                    invoke_context,
+                    "Failed to pay for Subchain State Account Initalization: {}",
+                    e
+                );
                 EvmError::FailedToPayForSubchainInit
             })?;
 
@@ -869,6 +885,14 @@ impl EvmProcessor {
             .set_data(config_ser);
 
         Ok(())
+    }
+
+    fn process_execute_subchain_tx(
+        &self,
+        _subchain: ChainID,
+        _tx: evm_state::Transaction,
+    ) -> Result<(), EvmError> {
+        todo!()
     }
 
     /// Ensure that first account is program itself, and it's locked for writes.
@@ -932,10 +956,11 @@ mod test {
     use num_traits::Zero;
     use primitive_types::{H160, H256, U256};
     use solana_program_runtime::{
+        evm_executor_context::{self, EvmBank, EvmExecutorContext},
         invoke_context::{BuiltinProgram, InvokeContext},
         timings::ExecuteTimings,
     };
-    use solana_sdk::sysvar::rent::Rent;
+    use solana_sdk::{feature_set::velas::evm_new_error_handling, sysvar::rent::Rent};
     use solana_sdk::{instruction::CompiledInstruction, pubkey::Pubkey};
     use solana_sdk::{
         instruction::{AccountMeta, Instruction},
@@ -1013,25 +1038,39 @@ mod test {
 
         // Emulate native transaction
         fn process_transaction(&mut self, ixs: Vec<Instruction>) -> Result<(), InstructionError> {
-            let evm_state_clone = self.evm_state.clone();
-            let evm_executor = evm_state::Executor::with_config(
-                evm_state_clone,
+            let feature_set = evm_state::executor::FeatureSet::new(
+                self.feature_set
+                    .is_active(&solana_sdk::feature_set::velas::unsigned_tx_fix::id()),
+                self.feature_set
+                    .is_active(&solana_sdk::feature_set::velas::clear_logs_on_error::id()),
+                self.feature_set.is_active(
+                    &solana_sdk::feature_set::velas::accept_zero_gas_price_with_native_fee::id(),
+                ),
+            );
+            let evm_bank = EvmBank::new(
+                evm::TEST_CHAIN_ID,
                 Default::default(),
-                evm::EvmConfig::new(
-                    evm::TEST_CHAIN_ID,
-                    self.feature_set
-                        .is_active(&solana_sdk::feature_set::velas::burn_fee::id()),
-                ),
-                evm_state::executor::FeatureSet::new(
-                    self.feature_set
-                        .is_active(&solana_sdk::feature_set::velas::unsigned_tx_fix::id()),
-                    self.feature_set
-                        .is_active(&solana_sdk::feature_set::velas::clear_logs_on_error::id()),
-                    self.feature_set.is_active(
-                        &solana_sdk::feature_set::velas::accept_zero_gas_price_with_native_fee::id(
-                        ),
-                    ),
-                ),
+                self.evm_state.clone().into(),
+            );
+            let clear_logs = self
+                .feature_set
+                .is_active(&solana_sdk::feature_set::velas::clear_logs_on_native_error::id());
+            let is_evm_burn_fee_activated = self
+                .feature_set
+                .is_active(&solana_sdk::feature_set::velas::burn_fee::id());
+            let evm_new_error_handling = self
+                .feature_set
+                .is_active(&solana_sdk::feature_set::velas::evm_new_error_handling::id());
+            let mut evm_executor_context = EvmExecutorContext::new(
+                evm_bank,
+                feature_set,
+                1_000_000,
+                1_000_000,
+                false,
+                is_evm_burn_fee_activated,
+                evm_new_error_handling,
+                clear_logs,
+                evm_executor_context::EvmExecutorContextType::Execution,
             );
 
             let evm_program = BuiltinProgram {
@@ -1053,8 +1092,11 @@ mod test {
             // keys.dedup();
 
             let mut transaction_context = TransactionContext::new(accs, ixs.len(), ixs.len());
-            let mut invoke_context =
-                InvokeContext::new_mock_evm(&mut transaction_context, builtins, evm_executor);
+            let mut invoke_context = InvokeContext::new_mock_evm(
+                &mut transaction_context,
+                builtins,
+                &mut evm_executor_context,
+            );
             invoke_context.feature_set = Arc::new(self.feature_set.clone());
 
             let program_index = keys
@@ -1097,9 +1139,6 @@ mod test {
                     let executor = invoke_context
                         .deconstruct_evm()
                         .expect("Evm executor should exist");
-                    let clear_logs = self.feature_set.is_active(
-                        &solana_sdk::feature_set::velas::clear_logs_on_native_error::id(),
-                    );
                     self.evm_state
                         .apply_failed_update(&executor.evm_backend, clear_logs);
                     return Err(e);
