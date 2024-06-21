@@ -77,10 +77,6 @@ impl<'a> AccountStructure<'a> {
             })
     }
 
-    pub fn find_signer(&self) -> Option<&KeyedAccount> {
-        self.users.iter().find(|keyed| keyed.signer_key().is_some())
-    }
-
     /// Create AccountStructure for testing purposes, with random accounts.
     #[cfg(test)]
     pub(crate) fn testing<F, U>(num_keys: usize, func: F) -> U

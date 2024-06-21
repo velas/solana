@@ -182,6 +182,15 @@ pub fn parse_evm(
                     "config": config
                 }),
             }),
+            EvmSubChain::ExecuteTx { tx } => match tx {
+                ExecuteTransaction::Signed { tx: Some(evm_tx) } => todo!(),
+                ExecuteTransaction::Signed { tx: None } => todo!(),
+                ExecuteTransaction::ProgramAuthorized {
+                    tx: Some(evm_tx),
+                    from,
+                } => todo!(),
+                ExecuteTransaction::ProgramAuthorized { tx: None, from } => todo!(),
+            },
         },
     }
 }

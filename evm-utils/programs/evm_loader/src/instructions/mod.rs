@@ -165,6 +165,12 @@ pub enum EvmInstruction {
         fee_type: FeePayerType,
     },
 
+    // TODO: polish docs
+    /// account_structure [
+    ///     account_key[0] - evm state
+    ///     account_key[1] - custom evm state
+    ///     account_key[2] - signer
+    /// ]
     EvmSubchain(EvmSubChain),
 }
 
@@ -218,11 +224,13 @@ pub struct SubchainConfig {
     Serialize,
     Deserialize,
 )]
+// NOTE: do not forget to update `solana_transaction_status::parse_evm` when changing instruction data
 pub enum EvmSubChain {
     /// Allocate Data Account for newly created EVM Subchain
     CreateAccount { id: ChainID, config: SubchainConfig },
+
     /// Execute EVM Subchain Transaction
-    ExecuteTx { id: ChainID, tx: Transaction },
+    ExecuteTx { tx: ExecuteTransaction },
 }
 
 impl EvmInstruction {
