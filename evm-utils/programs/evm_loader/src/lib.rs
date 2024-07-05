@@ -1,6 +1,7 @@
 pub mod account_structure;
 pub mod tx_chunks;
 
+pub mod blockhash_queue;
 pub mod error;
 pub mod instructions;
 pub mod precompiles;
@@ -41,10 +42,11 @@ pub mod scope {
 }
 
 use instructions::{
-    v0, EvmBigTransaction, EvmInstruction, ExecuteTransaction, FeePayerType,
-    EVM_INSTRUCTION_BORSH_PREFIX,
+    v0, EvmBigTransaction, EvmInstruction, ExecuteTransaction, FeePayerType, PreSeedConfig,
+    SubchainConfig, EVM_INSTRUCTION_BORSH_PREFIX,
 };
 use scope::*;
+use solana_program_runtime::evm_executor_context::ChainID;
 use solana_sdk::instruction::AccountMeta;
 
 pub static ID: solana::Address = solana_sdk::evm_loader::ID;
@@ -96,6 +98,33 @@ pub fn send_raw_tx(
             tx: ExecuteTransaction::Signed { tx: Some(evm_tx) },
             fee_type,
         },
+        account_metas,
+    )
+}
+pub fn create_evm_subchain_account(
+    owner: solana::Address,
+    id: ChainID,
+    config: SubchainConfig,
+    pre_seed: PreSeedConfig,
+) -> solana::Instruction {
+    let (evm_subchain_state_pda, _bump_seed) = solana::Address::find_program_address(
+        &[b"evm_subchain", &id.to_be_bytes()],
+        &solana_sdk::evm_loader::ID,
+    );
+    let account_metas = vec![
+        AccountMeta::new(solana::evm_state::ID, false),
+        AccountMeta::new(evm_subchain_state_pda, false),
+        AccountMeta::new(owner, true),
+        AccountMeta::new(solana_sdk::system_program::ID, false),
+    ];
+
+    create_evm_instruction_with_borsh(
+        crate::ID,
+        &EvmInstruction::EvmSubchain(instructions::EvmSubChain::CreateAccount {
+            id,
+            config,
+            pre_seed,
+        }),
         account_metas,
     )
 }

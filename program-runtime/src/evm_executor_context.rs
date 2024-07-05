@@ -304,13 +304,24 @@ impl EvmExecutorContext {
             active_executor: None,
         }
     }
+    pub fn get_main_chain_id(&self) -> ChainID {
+        self.evm.main_chain().id()
+    }
 
-    pub fn get_executor(&mut self /* chain_id */) -> Option<Rc<RefCell<Executor>>> {
+    pub fn get_executor(
+        &mut self,
+        chain_id: Option<ChainID>,
+        new_chain: bool,
+    ) -> Option<Rc<RefCell<Executor>>> {
         // if self.active_executor.is_some() {
         //     warn!("not a warn: getting active executor");
         //     return self.active_executor.clone();
         // }
 
+        // TODO: Check chain_id
+        if self.active_executor.is_some() {
+            return self.active_executor.clone();
+        }
         // append to old patch if exist, or create new, from existing evm state
         // TODO: Can be inlined?
         self.evm_patch = self.evm_patch.take().or_else(|| match self.context_type {
@@ -359,8 +370,6 @@ impl EvmExecutorContext {
     //     *evm_patch.get_mut(chain_id).expect("Evm patch should exist, on transaction execution.") = Some(changed_patches);
     // }
 
-    // TODO: Return Result<(), E>. Let caller decide how to unwrap.
-    /// # Panics
     pub fn cleanup(&mut self, strategy: PatchStrategy) {
         let executor: Executor = {
             let executor = self
@@ -373,6 +382,19 @@ impl EvmExecutorContext {
         };
 
         let new_patch = executor.deconstruct();
+
+        let before = self
+            .evm_patch
+            .as_ref()
+            .map(|p| p.last_root())
+            .unwrap_or_default();
+        let after = new_patch.last_root();
+
+        log::trace!(
+            "Updating EVM state, hash_before = {:?}, after = {:?}",
+            before,
+            after
+        );
         // On error save only transaction and increase nonce.
         match strategy {
             PatchStrategy::ApplyFailed => {

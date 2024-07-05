@@ -81,3 +81,9 @@
 ## Test cases
 
 Create EVM Subchain config and execute mainchain/subchain txs, make sure precompiles are not activated on subchain
+
+
+
+1. Create evm -  add pre-seed
+
+

@@ -2,7 +2,7 @@ use {
     crate::{
         accounts_data_meter::AccountsDataMeter,
         compute_budget::ComputeBudget,
-        evm_executor_context::EvmExecutorContext,
+        evm_executor_context::{ChainID, EvmExecutorContext},
         ic_logger_msg, ic_msg,
         log_collector::LogCollector,
         native_loader::NativeLoader,
@@ -1060,10 +1060,14 @@ impl<'a> InvokeContext<'a> {
         Err(InstructionError::UnsupportedProgramId)
     }
 
-    pub fn get_evm_executor(&mut self) -> Option<Rc<RefCell<evm_state::Executor>>> {
+    pub fn get_evm_executor(
+        &mut self,
+        chain_id: Option<ChainID>,
+        new_chain: bool,
+    ) -> Option<Rc<RefCell<evm_state::Executor>>> {
         self.evm_executor_context
             .as_mut()
-            .and_then(|c| c.get_executor())
+            .and_then(|c| c.get_executor(chain_id, new_chain))
     }
 
     pub fn get_parent_caller(&self) -> Option<&Pubkey> {

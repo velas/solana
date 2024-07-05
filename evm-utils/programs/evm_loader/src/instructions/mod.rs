@@ -209,6 +209,15 @@ pub struct SubchainConfig {
     pub hardfork: Hardfork,
     // pub last_hashes: [H256; 256],
 }
+impl Default for SubchainConfig {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            hardfork: Hardfork::Istanbul,
+            // last_hashes: [H256::zero(); 256],
+        }
+    }
+}
 
 #[derive(
     BorshSerialize,
@@ -227,10 +236,44 @@ pub struct SubchainConfig {
 // NOTE: do not forget to update `solana_transaction_status::parse_evm` when changing instruction data
 pub enum EvmSubChain {
     /// Allocate Data Account for newly created EVM Subchain
-    CreateAccount { id: ChainID, config: SubchainConfig },
+    ///
+    /// Outer args:
+    ///     account_key[0] - Evm state
+    ///     account_key[1] - Custom evm state
+    ///     account_key[2] - Signer (owner of subchain)
+    ///     account_key[3] - pre-seed data account [Optional]
+    CreateAccount {
+        id: ChainID,
+        config: SubchainConfig,
+        pre_seed: PreSeedConfig,
+    },
 
     /// Execute EVM Subchain Transaction
+    ///
+    /// Outer args:
+    ///     account_key[0] - evm state
+    ///     account_key[1] - custom evm state
+    ///     account_key[2] - bridge account
     ExecuteTx { tx: ExecuteTransaction },
+}
+
+#[derive(
+    BorshSerialize,
+    BorshDeserialize,
+    // TODO: add schema generation custom command
+    // BorshSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    Default,
+)]
+pub struct PreSeedConfig {
+    pub balances: Vec<(Address, u64)>,
 }
 
 impl EvmInstruction {
