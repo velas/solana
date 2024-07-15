@@ -909,15 +909,14 @@ mod evmtests {
             hash: Hash,
             lamports: u64,
         ) -> Transaction {
-            let mut pre_seed: solana_evm_loader_program::instructions::PreSeedConfig =
+            let mut config: solana_evm_loader_program::instructions::SubchainConfig =
                 Default::default();
-            pre_seed.balances.push((receiver, lamports.into()));
+            config.mint.push((receiver, lamports.into()));
             let from_pubkey = from_keypair.pubkey();
             let instruction = solana_evm_loader_program::create_evm_subchain_account(
                 from_pubkey,
                 chain_id,
-                Default::default(),
-                pre_seed,
+                config,
             );
             let s = Keypair::new();
             let message = Message::new(&[instruction], Some(&from_pubkey));
@@ -953,19 +952,17 @@ mod evmtests {
         assert_eq!(evm_state.processed_tx_len(), 0);
 
         let subchain_evm_state = todo!(evm_state);
+
+        assert_eq!(subchain_evm_state.processed_tx_len(), 1);
         let account = bank.get_account(&mint_keypair.pubkey()).unwrap();
-        assert_eq!(account.lamports(), 20000);
+        assert_eq!(account.lamports(), 0);
         let state = subchain_evm_state
             .get_account_state(receiver)
             .unwrap_or_default();
-        assert_eq!(state.balance, 0.into());
-        let state_swapper = evm_state
-            .get_account_state(*solana_evm_loader_program::precompiles::ETH_TO_VLX_ADDR)
-            .unwrap_or_default();
-        assert_eq!(state_swapper.nonce, 1.into());
-        assert_eq!(state_swapper.balance, 0.into());
+        assert_eq!(state.balance, 20000.into());
 
+        todo!()
         // hash updated with nonce increasing
-        assert_ne!(hash_before, hash_after);
+        // assert_ne!(hash_before, hash_after);
     }
 }

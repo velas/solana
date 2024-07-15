@@ -2,8 +2,6 @@ use std::cell::RefMut;
 use std::fmt::Write;
 use std::ops::DerefMut;
 
-use crate::instructions::PreSeedConfig;
-
 use super::account_structure::AccountStructure;
 use super::instructions::{
     EvmBigTransaction, EvmInstruction, EvmSubChain, ExecuteTransaction, FeePayerType,
@@ -14,13 +12,13 @@ use super::scope::*;
 use evm_state::{H160, U256};
 use log::*;
 
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::BorshDeserialize;
 use evm::{gweis_to_lamports, lamports_to_gwei, Executor, ExitReason};
 use evm_state::ExecutionResult;
 use serde::de::DeserializeOwned;
 use solana_program_runtime::evm_executor_context::ChainID;
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
-use solana_sdk::borsh::get_packed_len;
+use solana_sdk::borsh::{get_instance_packed_len, get_packed_len};
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount, WritableAccount},
     instruction::InstructionError,
@@ -110,9 +108,13 @@ impl EvmProcessor {
             }
             _ => limited_deserialize(data)?,
         };
-
+        // Early check for subchain instruction to provide chain_id.
+        let (ix_chain_id, create_subchain) = Self::match_subchain_id(&ix);
+        let main_chain = ix_chain_id.is_none();
         // processor gets access to factory from invoke context
-        let evm_executor = if let Some(evm_executor) = invoke_context.get_evm_executor(None, false)
+        let evm_executor = if let Some(evm_executor) =
+            // provide: Context for subchain
+            invoke_context.get_evm_executor(ix_chain_id, create_subchain)
         {
             evm_executor
         } else {
@@ -169,24 +171,27 @@ impl EvmProcessor {
                 tx,
                 fee_type,
                 borsh_serialization_used,
+                false, // subchain
             ),
             EvmInstruction::EvmSubchain(evm_subchain_ix) => match evm_subchain_ix {
-                EvmSubChain::CreateAccount {
-                    id,
-                    config,
-                    pre_seed,
-                } => self.create_evm_subchain_account(
-                    invoke_context,
-                    first_keyed_account,
-                    id,
-                    config,
-                    pre_seed,
+                EvmSubChain::CreateAccount { chain_id, config } => self
+                    .create_evm_subchain_account(
+                        invoke_context,
+                        first_keyed_account,
+                        chain_id,
+                        config,
+                    ),
+                EvmSubChain::ExecuteTx { chain_id, tx } => self.process_execute_subchain_tx(
+                    chain_id,
+                    executor,
+                    &invoke_context,
+                    accounts,
+                    tx,
                 ),
-                EvmSubChain::ExecuteTx { tx } => self.process_execute_subchain_tx(tx),
             },
         };
 
-        if register_swap_tx_in_evm {
+        if register_swap_tx_in_evm && main_chain {
             executor.reset_balance(*precompiles::ETH_TO_VLX_ADDR, ignore_reset_on_cleared)
         }
 
@@ -225,6 +230,18 @@ impl EvmProcessor {
         })
     }
 
+    fn match_subchain_id(ix: &EvmInstruction) -> (Option<ChainID>, bool) {
+        match ix {
+            EvmInstruction::EvmSubchain(EvmSubChain::CreateAccount { chain_id, .. }) => {
+                (Some(*chain_id), true)
+            }
+            EvmInstruction::EvmSubchain(EvmSubChain::ExecuteTx { chain_id, .. }) => {
+                (Some(*chain_id), false)
+            }
+            _ => (None, false),
+        }
+    }
+
     fn process_execute_tx(
         &self,
         executor: &mut Executor,
@@ -233,15 +250,24 @@ impl EvmProcessor {
         tx: ExecuteTransaction,
         fee_type: FeePayerType,
         borsh_used: bool,
+        subchain: bool,
     ) -> Result<(), EvmError> {
         let is_big = tx.is_big();
         let keep_old_errors = true;
+
+        // Calculate index of sender and fee collector account,
+        // they should appear after storage and subchain_evm_state.
+        let mut start_idx = if is_big { 1 } else { 0 };
+
+        if subchain {
+            start_idx += 1;
+        }
+
         // TODO: Add logic for fee collector
-        let (sender, _fee_collector) = if is_big {
-            (accounts.users.get(1), accounts.users.get(2))
-        } else {
-            (accounts.first(), accounts.users.get(1))
-        };
+        let (sender, _fee_collector) = (
+            accounts.users.get(start_idx),
+            accounts.users.get(start_idx + 1),
+        );
 
         // FeePayerType::Native is possible only in new serialization format
         if fee_type.is_native() && sender.is_none() {
@@ -249,6 +275,7 @@ impl EvmProcessor {
             return Err(EvmError::MissingRequiredSignature);
         }
 
+        // TODO: Remove swap precompile for subchain.
         fn precompile_set(
             support_precompile: bool,
             evm_new_precompiles: bool,
@@ -351,6 +378,7 @@ impl EvmProcessor {
             tx_gas_price,
             result,
             withdraw_fee_from_evm,
+            subchain,
         )
     }
 
@@ -673,6 +701,7 @@ impl EvmProcessor {
         tx_gas_price: evm_state::U256,
         result: Result<evm_state::ExecutionResult, evm_state::error::Error>,
         withdraw_fee_from_evm: bool,
+        subchain: bool,
     ) -> Result<(), EvmError> {
         let remove_native_logs_after_swap = true;
         let mut result = result.map_err(|e| {
@@ -716,6 +745,15 @@ impl EvmProcessor {
         // Fee refund will not work with revert, because transaction will be reverted from native chain too.
         if let ExitReason::Revert(_) = result.exit_reason {
             return Err(EvmError::RevertTransaction);
+        }
+
+        // if subchain - skip all logic related to fee refund and native swap.
+        if subchain {
+            ic_msg!(
+                invoke_context,
+                "Subchain transaction executed successfully, skipping fee refund and native swap.",
+            );
+            return Ok(());
         }
 
         let full_fee = tx_gas_price * result.used_gas;
@@ -775,7 +813,6 @@ impl EvmProcessor {
         first_keyed_account: usize,
         subchain_id: u64,
         config: SubchainConfig,
-        preseed: PreSeedConfig,
     ) -> Result<(), EvmError> {
         let (evm_subchain_state_pda, _bump_seed) = Pubkey::find_program_address(
             &[b"evm_subchain", &subchain_id.to_be_bytes()],
@@ -820,7 +857,7 @@ impl EvmProcessor {
         }
 
         // Check if signer has enough balance to create subchain account.
-        let whale = accounts.users.get(0).ok_or_else(|| {
+        let whale = accounts.users.get(1).ok_or_else(|| {
             ic_msg!(invoke_context, "Signer is required");
             EvmError::MissingRequiredSignature
         })?;
@@ -829,7 +866,7 @@ impl EvmProcessor {
             .try_account_ref()
             .map_err(|_| EvmError::BorrowingFailed)?
             .lamports()
-            > SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX
+            < SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX
         {
             ic_msg!(
                 invoke_context,
@@ -849,8 +886,15 @@ impl EvmProcessor {
             &whale_pubkey,
             &evm_subchain_state_pubkey,
             SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX,
-            get_packed_len::<SubchainConfig>() as u64,
+            get_packed_len::<crate::subchain::SubchainState>() as u64,
             &solana_sdk::evm_loader::ID,
+        );
+
+        ic_msg!(
+            invoke_context,
+            "Creating subchain account, with transfering {SUBCHAIN_CREATION_DEPOSIT_VLX} VLX from {} to {}",
+            whale_pubkey,
+            evm_subchain_state_pubkey
         );
         invoke_context
             .native_invoke(create_account_ix, &[evm_subchain_state_pubkey])
@@ -881,36 +925,42 @@ impl EvmProcessor {
         } else {
             ic_msg!(
                 invoke_context,
-                "Recursive cross-program evm execution not enabled."
+                "Double borrow of same subchain executor."
             );
             return Err(EvmError::RecursiveCrossExecution.into());
         };
 
         // Load pre-seed
-        for (evm_address, lamports) in preseed.balances {
-            let gweis = lamports_to_gwei(lamports);
-            executor.deposit(evm_address, gweis);
-            executor.register_swap_tx_in_evm(H160::zero(), evm_address, gweis);
+        for (evm_address, lamports) in &config.mint {
+            let gweis = lamports_to_gwei(*lamports);
+            executor.deposit(*evm_address, gweis);
+            executor.register_swap_tx_in_evm(H160::zero(), *evm_address, gweis);
         }
-        // Write config Into subchain account
-        // TODO: Save owner?
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
-        let mut config_ser = Vec::with_capacity(get_packed_len::<SubchainConfig>());
-        config
-            .serialize(&mut config_ser)
-            .map_err(|_| EvmError::SerializationError)?;
-        accounts
-            .users
-            .get(0)
-            .unwrap() // NOTE: safe to unwrap
-            .try_account_ref_mut()
-            .map_err(|_| EvmError::BorrowingFailed)?
-            .set_data(config_ser);
-        Ok(())
+
+        // write config into subchain state, and save owner.
+        let state = crate::subchain::SubchainState::new(config, whale_pubkey);
+        // serialize data into account.
+        state.write_data(accounts)
     }
 
-    fn process_execute_subchain_tx(&self, _tx: ExecuteTransaction) -> Result<(), EvmError> {
-        todo!()
+    fn process_execute_subchain_tx(
+        &self,
+        chain_id: ChainID,
+        executor: &mut Executor,
+        invoke_context: &InvokeContext,
+        accounts: AccountStructure,
+        tx: ExecuteTransaction,
+    ) -> Result<(), EvmError> {
+        self.process_execute_tx(
+            executor,
+            invoke_context,
+            accounts,
+            tx,
+            FeePayerType::Native,
+            true,
+            true,
+        )
     }
 
     /// Ensure that first account is program itself, and it's locked for writes.
@@ -974,12 +1024,17 @@ mod test {
     use num_traits::Zero;
     use primitive_types::{H160, H256, U256};
     use solana_program_runtime::{
+        compute_budget::ComputeBudget,
         evm_executor_context::{self, EvmBank, EvmExecutorContext},
         invoke_context::{BuiltinProgram, InvokeContext},
         timings::ExecuteTimings,
     };
     use solana_sdk::{
-        account::Account, feature_set::velas::evm_new_error_handling, sysvar::rent::Rent,
+        account::Account,
+        feature_set::{self, velas::evm_new_error_handling},
+        keyed_account::{get_signers, keyed_account_at_index},
+        system_program,
+        sysvar::rent::Rent,
     };
     use solana_sdk::{instruction::CompiledInstruction, pubkey::Pubkey};
     use solana_sdk::{
@@ -988,16 +1043,17 @@ mod test {
     };
     use solana_sdk::{native_loader, transaction_context::TransactionContext};
     use solana_sdk::{program_utils::limited_deserialize, transaction_context::InstructionAccount};
+    use system_instruction::{SystemError, SystemInstruction, MAX_PERMITTED_DATA_LENGTH};
     type MutableAccount = AccountSharedData;
 
     use super::TEST_CHAIN_ID as CHAIN_ID;
     use borsh::BorshSerialize;
-    use std::rc::Rc;
-    use std::sync::Arc;
     use std::{
         cell::RefCell,
         collections::{BTreeMap, BTreeSet},
     };
+    use std::{collections::HashMap, rc::Rc};
+    use std::{collections::HashSet, sync::Arc};
 
     // Testing object that emulate Bank work, and can execute transactions.
     // Emulate batch of native transactions.
@@ -1005,6 +1061,8 @@ mod test {
     struct EvmMockContext {
         evm_state: evm_state::EvmBackend<evm_state::Incomming>,
         evm_state_account: AccountSharedData,
+
+        subchains: HashMap<ChainID, evm_state::EvmBackend<evm_state::Incomming>>,
         evm_program_account: AccountSharedData,
         rest_accounts: BTreeMap<Pubkey, MutableAccount>,
         feature_set: solana_sdk::feature_set::FeatureSet,
@@ -1019,6 +1077,7 @@ mod test {
                 evm_state: evm_state::EvmBackend::default(),
                 evm_state_account: crate::create_state_account(evm_balance),
                 evm_program_account: AccountSharedData::new(1, 0, &native_loader::ID),
+                subchains: HashMap::new(),
                 rest_accounts: [(
                     solana_sdk::system_program::ID,
                     Account {
@@ -1068,6 +1127,228 @@ mod test {
             self.evm_state.set_account_state(evm_addr, account_state)
         }
 
+        // Used only for create_and_assign_account
+        fn mock_system_process_instruction_cpi(
+            first_instruction_account: usize,
+            instruction_data: &[u8],
+            invoke_context: &mut InvokeContext,
+        ) -> Result<(), InstructionError> {
+            // represents an address that may or may not have been generated
+            //  from a seed
+            #[derive(PartialEq, Default, Debug)]
+            struct Address {
+                address: Pubkey,
+                base: Option<Pubkey>,
+            }
+
+            impl Address {
+                fn is_signer(&self, signers: &HashSet<Pubkey>) -> bool {
+                    if let Some(base) = self.base {
+                        signers.contains(&base)
+                    } else {
+                        signers.contains(&self.address)
+                    }
+                }
+                fn create(
+                    address: &Pubkey,
+                    with_seed: Option<(&Pubkey, &str, &Pubkey)>,
+                    invoke_context: &InvokeContext,
+                ) -> Result<Self, InstructionError> {
+                    let base = if let Some((base, seed, owner)) = with_seed {
+                        let address_with_seed = Pubkey::create_with_seed(base, seed, owner)?;
+                        // re-derive the address, must match the supplied address
+                        if *address != address_with_seed {
+                            ic_msg!(
+                                invoke_context,
+                                "Create: address {} does not match derived address {}",
+                                address,
+                                address_with_seed
+                            );
+                            return Err(SystemError::AddressWithSeedMismatch.into());
+                        }
+                        Some(*base)
+                    } else {
+                        None
+                    };
+
+                    Ok(Self {
+                        address: *address,
+                        base,
+                    })
+                }
+            }
+
+            let keyed_accounts = invoke_context.get_keyed_accounts()?;
+            let instruction = limited_deserialize(instruction_data)?;
+            match instruction {
+                SystemInstruction::CreateAccount {
+                    lamports,
+                    space,
+                    owner,
+                } => {
+                    let from = keyed_account_at_index(keyed_accounts, first_instruction_account)?;
+                    let to = keyed_account_at_index(keyed_accounts, first_instruction_account + 1)?;
+                    let to_address = Address::create(to.unsigned_key(), None, invoke_context)?;
+                    let signers = get_signers(&keyed_accounts[first_instruction_account..]);
+                    fn allocate(
+                        account: &mut AccountSharedData,
+                        address: &Address,
+                        space: u64,
+                        signers: &HashSet<Pubkey>,
+                        invoke_context: &InvokeContext,
+                    ) -> Result<(), InstructionError> {
+                        if !address.is_signer(signers) {
+                            ic_msg!(
+                                invoke_context,
+                                "Allocate: 'to' account {:?} must sign",
+                                address
+                            );
+                            return Err(InstructionError::MissingRequiredSignature);
+                        }
+
+                        // if it looks like the `to` account is already in use, bail
+                        //   (note that the id check is also enforced by message_processor)
+                        if !account.data().is_empty() || !system_program::check_id(account.owner())
+                        {
+                            ic_msg!(
+                                invoke_context,
+                                "Allocate: account {:?} already in use",
+                                address
+                            );
+                            return Err(SystemError::AccountAlreadyInUse.into());
+                        }
+
+                        if space > MAX_PERMITTED_DATA_LENGTH {
+                            ic_msg!(
+                                invoke_context,
+                                "Allocate: requested {}, max allowed {}",
+                                space,
+                                MAX_PERMITTED_DATA_LENGTH
+                            );
+                            return Err(SystemError::InvalidAccountDataLength.into());
+                        }
+
+                        account.set_data(vec![0; space as usize]);
+
+                        Ok(())
+                    }
+
+                    fn assign(
+                        account: &mut AccountSharedData,
+                        address: &Address,
+                        owner: &Pubkey,
+                        signers: &HashSet<Pubkey>,
+                        invoke_context: &InvokeContext,
+                    ) -> Result<(), InstructionError> {
+                        // no work to do, just return
+                        if account.owner() == owner {
+                            return Ok(());
+                        }
+
+                        if !address.is_signer(signers) {
+                            ic_msg!(invoke_context, "Assign: account {:?} must sign", address);
+                            return Err(InstructionError::MissingRequiredSignature);
+                        }
+
+                        account.set_owner(*owner);
+                        Ok(())
+                    }
+
+                    fn allocate_and_assign(
+                        to: &mut AccountSharedData,
+                        to_address: &Address,
+                        space: u64,
+                        owner: &Pubkey,
+                        signers: &HashSet<Pubkey>,
+                        invoke_context: &InvokeContext,
+                    ) -> Result<(), InstructionError> {
+                        allocate(to, to_address, space, signers, invoke_context)?;
+                        assign(to, to_address, owner, signers, invoke_context)
+                    }
+
+                    fn transfer_verified(
+                        from: &KeyedAccount,
+                        to: &KeyedAccount,
+                        lamports: u64,
+                        invoke_context: &InvokeContext,
+                    ) -> Result<(), InstructionError> {
+                        if !from.data_is_empty()? {
+                            ic_msg!(invoke_context, "Transfer: `from` must not carry data");
+                            return Err(InstructionError::InvalidArgument);
+                        }
+                        if lamports > from.lamports()? {
+                            ic_msg!(
+                                invoke_context,
+                                "Transfer: insufficient lamports {}, need {}",
+                                from.lamports()?,
+                                lamports
+                            );
+                            return Err(SystemError::ResultWithNegativeLamports.into());
+                        }
+
+                        from.try_account_ref_mut()?.checked_sub_lamports(lamports)?;
+                        to.try_account_ref_mut()?.checked_add_lamports(lamports)?;
+                        Ok(())
+                    }
+
+                    fn transfer(
+                        from: &KeyedAccount,
+                        to: &KeyedAccount,
+                        lamports: u64,
+                        invoke_context: &InvokeContext,
+                    ) -> Result<(), InstructionError> {
+                        if !invoke_context
+                            .feature_set
+                            .is_active(&feature_set::system_transfer_zero_check::id())
+                            && lamports == 0
+                        {
+                            return Ok(());
+                        }
+
+                        if from.signer_key().is_none() {
+                            ic_msg!(
+                                invoke_context,
+                                "Transfer: `from` account {} must sign",
+                                from.unsigned_key()
+                            );
+                            return Err(InstructionError::MissingRequiredSignature);
+                        }
+
+                        transfer_verified(from, to, lamports, invoke_context)
+                    }
+                    {
+                        let to = &mut to.try_account_ref_mut()?;
+                        if to.lamports() > 0 {
+                            ic_msg!(
+                                invoke_context,
+                                "Create Account: account {:?} already in use",
+                                to_address
+                            );
+                            return Err(SystemError::AccountAlreadyInUse.into());
+                        }
+
+                        allocate_and_assign(
+                            to,
+                            &to_address,
+                            space,
+                            &owner,
+                            &signers,
+                            invoke_context,
+                        )?;
+                    }
+                    transfer(from, to, lamports, invoke_context)
+                }
+                _ => panic!("Unsupported system instruction"),
+            }
+        }
+        // we cant create method like this because system_instruction_processor is in rutime
+        fn get_solana_builtins() -> [BuiltinProgram; 1] {
+            [BuiltinProgram {
+                program_id: solana_sdk::system_program::id(),
+                process_instruction: Self::mock_system_process_instruction_cpi,
+            }]
+        }
+
         // Emulate native transaction
         fn process_transaction(&mut self, ixs: Vec<Instruction>) -> Result<(), InstructionError> {
             let feature_set = evm_state::executor::FeatureSet::new(
@@ -1112,7 +1393,10 @@ mod test {
                     processor.process_instruction(acc, data, context)
                 },
             };
-            let builtins = &[evm_program];
+            let builtins = &Self::get_solana_builtins()
+                .into_iter()
+                .chain(Some(evm_program))
+                .collect::<Vec<_>>();
             let mut accs = vec![(crate::ID, self.native_account_cloned(crate::ID))];
             let mut keys = vec![crate::ID];
             for ix in &ixs {
@@ -1123,7 +1407,11 @@ mod test {
             }
             // keys.dedup();
 
-            let mut transaction_context = TransactionContext::new(accs, ixs.len(), ixs.len());
+            let mut transaction_context = TransactionContext::new(
+                accs,
+                ComputeBudget::default().max_invoke_depth.saturating_add(1),
+                ixs.len(),
+            );
             let mut invoke_context = InvokeContext::new_mock_evm(
                 &mut transaction_context,
                 builtins,
@@ -2874,8 +3162,8 @@ mod test {
         let mut evm_context = EvmMockContext::new(0);
         let user_id = Pubkey::new_unique();
         let user_acc = evm_context.native_account(user_id);
-        user_acc.set_owner(crate::ID);
-        user_acc.set_lamports(1000);
+        user_acc.set_owner(system_program::ID);
+        user_acc.set_lamports(10000000000000000);
 
         let evm_address = crate::evm_address_for_program(user_id);
         evm_context
@@ -2883,7 +3171,6 @@ mod test {
                 user_id,
                 22,
                 SubchainConfig::default(),
-                PreSeedConfig::default(),
             ))
             .unwrap();
 

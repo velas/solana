@@ -205,16 +205,14 @@ pub enum Hardfork {
     Deserialize,
 )]
 pub struct SubchainConfig {
-    pub version: u8,
     pub hardfork: Hardfork,
-    // pub last_hashes: [H256; 256],
+    pub mint: Vec<(Address, u64)>,
 }
 impl Default for SubchainConfig {
     fn default() -> Self {
         Self {
-            version: 0,
             hardfork: Hardfork::Istanbul,
-            // last_hashes: [H256::zero(); 256],
+            mint: vec![],
         }
     }
 }
@@ -243,9 +241,8 @@ pub enum EvmSubChain {
     ///     account_key[2] - Signer (owner of subchain)
     ///     account_key[3] - pre-seed data account [Optional]
     CreateAccount {
-        id: ChainID,
+        chain_id: ChainID,
         config: SubchainConfig,
-        pre_seed: PreSeedConfig,
     },
 
     /// Execute EVM Subchain Transaction
@@ -254,26 +251,10 @@ pub enum EvmSubChain {
     ///     account_key[0] - evm state
     ///     account_key[1] - custom evm state
     ///     account_key[2] - bridge account
-    ExecuteTx { tx: ExecuteTransaction },
-}
-
-#[derive(
-    BorshSerialize,
-    BorshDeserialize,
-    // TODO: add schema generation custom command
-    // BorshSchema,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    Ord,
-    PartialOrd,
-    Serialize,
-    Deserialize,
-    Default,
-)]
-pub struct PreSeedConfig {
-    pub balances: Vec<(Address, u64)>,
+    ExecuteTx {
+        chain_id: ChainID,
+        tx: ExecuteTransaction,
+    },
 }
 
 impl EvmInstruction {

@@ -7,6 +7,7 @@ pub mod instructions;
 pub mod precompiles;
 pub mod processor;
 pub mod solana_extension;
+pub mod subchain;
 
 /// Public API for intermediate eth <-> solana transfers
 pub mod scope {
@@ -42,8 +43,8 @@ pub mod scope {
 }
 
 use instructions::{
-    v0, EvmBigTransaction, EvmInstruction, ExecuteTransaction, FeePayerType, PreSeedConfig,
-    SubchainConfig, EVM_INSTRUCTION_BORSH_PREFIX,
+    v0, EvmBigTransaction, EvmInstruction, ExecuteTransaction, FeePayerType, SubchainConfig,
+    EVM_INSTRUCTION_BORSH_PREFIX,
 };
 use scope::*;
 use solana_program_runtime::evm_executor_context::ChainID;
@@ -103,12 +104,11 @@ pub fn send_raw_tx(
 }
 pub fn create_evm_subchain_account(
     owner: solana::Address,
-    id: ChainID,
+    chain_id: ChainID,
     config: SubchainConfig,
-    pre_seed: PreSeedConfig,
 ) -> solana::Instruction {
     let (evm_subchain_state_pda, _bump_seed) = solana::Address::find_program_address(
-        &[b"evm_subchain", &id.to_be_bytes()],
+        &[b"evm_subchain", &chain_id.to_be_bytes()],
         &solana_sdk::evm_loader::ID,
     );
     let account_metas = vec![
@@ -120,11 +120,7 @@ pub fn create_evm_subchain_account(
 
     create_evm_instruction_with_borsh(
         crate::ID,
-        &EvmInstruction::EvmSubchain(instructions::EvmSubChain::CreateAccount {
-            id,
-            config,
-            pre_seed,
-        }),
+        &EvmInstruction::EvmSubchain(instructions::EvmSubChain::CreateAccount { chain_id, config }),
         account_metas,
     )
 }

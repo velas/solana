@@ -3,9 +3,13 @@
 //!
 //!
 const MAX_BLOCKHASHES: usize = 256;
+use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
 use evm_state::H256 as Hash;
 use solana_sdk::clock::Slot;
 
+#[derive(
+    BorshSerialize, BorshDeserialize, BorshSchema, Clone, Debug, PartialEq, Eq, Ord, PartialOrd,
+)]
 pub struct BlockhashQueue {
     blockhashes: [Hash; MAX_BLOCKHASHES],
     last_slot: Slot,
