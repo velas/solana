@@ -251,7 +251,7 @@ pub enum EvmSubChain {
     ///     account_key[0] - evm state
     ///     account_key[1] - custom evm state
     ///     account_key[2] - bridge account
-    ExecuteTx {
+    ExecuteTransaction {
         chain_id: ChainID,
         tx: ExecuteTransaction,
     },

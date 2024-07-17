@@ -1,4 +1,5 @@
 use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
+use solana_sdk::account::ReadableAccount;
 use solana_sdk::borsh::get_packed_len;
 
 use crate::account_structure::AccountStructure;
@@ -35,12 +36,24 @@ impl SubchainState {
     pub fn update(&mut self, mut updater: impl FnMut(&mut BlockhashQueue)) {
         updater(&mut self.last_hashes);
     }
+
     pub fn last_hashes(&self) -> &BlockhashQueue {
         &self.last_hashes
     }
+    pub fn load(accounts: AccountStructure) -> Result<Self, EvmError> {
+        let account = accounts
+            .users
+            .first()
+            .unwrap() // NOTE: safe to unwrap
+            .try_account_ref()
+            .map_err(|_| EvmError::BorrowingFailed)?;
+        let state =
+            Self::try_from_slice(&account.data()).map_err(|_| EvmError::DeserializationError)?;
+        Ok(state)
+    }
 
     // Always first account in account structure.
-    pub fn write_data(&self, accounts: AccountStructure) -> Result<(), EvmError> {
+    pub fn save(&self, accounts: AccountStructure) -> Result<(), EvmError> {
         let mut buffer = Vec::with_capacity(get_packed_len::<Self>());
         self.serialize(&mut buffer)
             .map_err(|_| EvmError::SerializationError)?;

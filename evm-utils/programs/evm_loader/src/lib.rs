@@ -43,8 +43,8 @@ pub mod scope {
 }
 
 use instructions::{
-    v0, EvmBigTransaction, EvmInstruction, ExecuteTransaction, FeePayerType, SubchainConfig,
-    EVM_INSTRUCTION_BORSH_PREFIX,
+    v0, EvmBigTransaction, EvmInstruction, EvmSubChain, ExecuteTransaction, FeePayerType,
+    SubchainConfig, EVM_INSTRUCTION_BORSH_PREFIX,
 };
 use scope::*;
 use solana_program_runtime::evm_executor_context::ChainID;
@@ -121,6 +121,35 @@ pub fn create_evm_subchain_account(
     create_evm_instruction_with_borsh(
         crate::ID,
         &EvmInstruction::EvmSubchain(instructions::EvmSubChain::CreateAccount { chain_id, config }),
+        account_metas,
+    )
+}
+
+pub fn send_raw_tx_subchain(
+    signer: solana::Address,
+    evm_tx: evm::Transaction,
+    gas_collector: Option<solana::Address>,
+    chain_id: ChainID,
+) -> solana::Instruction {
+    let (evm_subchain_state_pda, _bump_seed) = solana::Address::find_program_address(
+        &[b"evm_subchain", &chain_id.to_be_bytes()],
+        &solana_sdk::evm_loader::ID,
+    );
+    let mut account_metas = vec![
+        AccountMeta::new(solana::evm_state::ID, false),
+        AccountMeta::new(evm_subchain_state_pda, false),
+        AccountMeta::new(signer, true),
+    ];
+    if let Some(gas_collector) = gas_collector {
+        account_metas.push(AccountMeta::new(gas_collector, false))
+    }
+
+    create_evm_instruction_with_borsh(
+        crate::ID,
+        &EvmInstruction::EvmSubchain(EvmSubChain::ExecuteTransaction {
+            tx: ExecuteTransaction::Signed { tx: Some(evm_tx) },
+            chain_id: chain_id,
+        }),
         account_metas,
     )
 }

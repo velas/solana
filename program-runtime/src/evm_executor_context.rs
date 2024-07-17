@@ -276,6 +276,24 @@ pub struct EvmExecutorContext {
 
 pub type RefCellLocked = ();
 
+pub type SubchainHashes = Box<[evm_state::H256; MAX_EVM_BLOCKHASHES]>;
+
+pub enum ChainParam {
+    GetMainChain,
+    CreateSubchain {
+        chain_id: ChainID,
+    },
+    GetSubchain {
+        chain_id: ChainID,
+        subchain_hashes: SubchainHashes,
+    },
+}
+impl ChainParam {
+    pub fn is_main(&self) -> bool {
+        matches!(self, ChainParam::GetMainChain)
+    }
+}
+
 impl EvmExecutorContext {
     pub fn new(
         // TODO: EvmBank should be shared with solana::Bank
@@ -308,16 +326,7 @@ impl EvmExecutorContext {
         self.evm.main_chain().id()
     }
 
-    pub fn get_executor(
-        &mut self,
-        chain_id: Option<ChainID>,
-        new_chain: bool,
-    ) -> Option<Rc<RefCell<Executor>>> {
-        // if self.active_executor.is_some() {
-        //     warn!("not a warn: getting active executor");
-        //     return self.active_executor.clone();
-        // }
-
+    pub fn get_executor(&mut self, params: ChainParam) -> Option<Rc<RefCell<Executor>>> {
         // TODO: Check chain_id
         if self.active_executor.is_some() {
             return self.active_executor.clone();

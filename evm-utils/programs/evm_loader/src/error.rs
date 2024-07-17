@@ -78,6 +78,9 @@ pub enum EvmError {
 
     #[snafu(display("Failed to serialize data into account."))]
     SerializationError,
+
+    #[snafu(display("Invalid subchain id."))]
+    InvalidSubchainId,
 }
 
 impl<E> DecodeError<E> for EvmError {
