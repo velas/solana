@@ -15,9 +15,9 @@ use {
         path::{Path, PathBuf},
         sync::Arc,
     },
-    triedb::empty_trie_hash,
 };
 
+pub use triedb::empty_trie_hash;
 pub const DEFAULT_GAS_LIMIT: u64 = 300_000_000;
 
 pub const BURN_GAS_PRICE: u64 = 2_000_000_000; // 2 lamports per gas.

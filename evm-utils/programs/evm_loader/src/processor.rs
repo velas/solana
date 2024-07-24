@@ -181,7 +181,7 @@ impl EvmProcessor {
                 // bind variable to increase lifetime of temporary RefCell borrow.
                 // TODO: refactor me
                 let (rc, mut refmut);
-                let executor = get_executor!(rc,refmut => invoke_context);
+                let executor = get_executor!(rc, refmut => invoke_context);
                 // TODO: reduce Double create in `EvmInstruction::EvmSubchain`.
                 let accounts = Self::build_account_structure(first_keyed_account, invoke_context)?;
 
@@ -290,20 +290,6 @@ impl EvmProcessor {
                 ic_msg!(invoke_context, "Instruction is not supported yet.");
                 Err(EvmError::InstructionNotSupportedYet)
             }
-        }
-    }
-
-    fn match_subchain_id(ix: &EvmInstruction) -> ChainParam {
-        match ix {
-            EvmInstruction::EvmSubchain(EvmSubChain::CreateAccount { chain_id, .. }) => {
-                ChainParam::CreateSubchain {
-                    chain_id: *chain_id,
-                }
-            }
-            EvmInstruction::EvmSubchain(EvmSubChain::ExecuteTransaction { chain_id, .. }) => {
-                todo!() ////ChainParam::GetSubchain { chain_id: chain_id, subchain_hashes: [H256::zero(); ] }
-            }
-            _ => ChainParam::GetMainChain,
         }
     }
 
@@ -987,12 +973,14 @@ impl EvmProcessor {
         let executor = get_executor!(rc, refmut => invoke_context, subchain_id);
         // TODO: Drop executor on error?
         // Load pre-seed
+
+        trace!("mint:{:?}", config.mint);
         for (evm_address, lamports) in &config.mint {
             let gweis = lamports_to_gwei(*lamports);
             executor.deposit(*evm_address, gweis);
             executor.register_swap_tx_in_evm(H160::zero(), *evm_address, gweis);
         }
-
+        trace!("executor:{:?}", executor);
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
         // write config into subchain state, and save owner.
         let state = crate::subchain::SubchainState::new(config, whale_pubkey);
@@ -1012,6 +1000,7 @@ impl EvmProcessor {
         let state = crate::subchain::SubchainState::load(accounts)?;
         let last_hashes = Box::new(state.last_hashes().get_hashes().clone());
         let executor = get_executor!(rc, refmut => invoke_context, chain_id, last_hashes);
+        trace!("executor:{:?}", executor);
         // TODO: How to deal with reborrowing?? (we neeed last hashes from account to create executor, but to get it we need to borrow invoke context.)
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
         self.process_execute_tx(
@@ -1079,8 +1068,9 @@ pub fn dummy_call(nonce: usize) -> (evm::Transaction, evm::UnsignedTransaction) 
 mod test {
     use super::*;
     use evm_state::{
+        empty_trie_hash,
         transactions::{TransactionAction, TransactionSignature},
-        AccountState, FromKey,
+        AccountState, EvmBackend, FromKey, Incomming,
     };
     use evm_state::{AccountProvider, ExitReason, ExitSucceed};
     use hex_literal::hex;
@@ -1088,7 +1078,7 @@ mod test {
     use primitive_types::{H160, H256, U256};
     use solana_program_runtime::{
         compute_budget::ComputeBudget,
-        evm_executor_context::{self, EvmBank, EvmExecutorContext},
+        evm_executor_context::{self, BlockHashEvm, EvmBank, EvmChain, EvmExecutorContext},
         invoke_context::{BuiltinProgram, InvokeContext},
         timings::ExecuteTimings,
     };
@@ -1114,6 +1104,7 @@ mod test {
     use std::{
         cell::RefCell,
         collections::{BTreeMap, BTreeSet},
+        sync::RwLock,
     };
     use std::{collections::HashMap, rc::Rc};
     use std::{collections::HashSet, sync::Arc};
@@ -1423,10 +1414,16 @@ mod test {
                     &solana_sdk::feature_set::velas::accept_zero_gas_price_with_native_fee::id(),
                 ),
             );
+            let subchains = self
+                .subchains
+                .iter()
+                .map(|(k, v)| (*k, v.clone().into()))
+                .collect();
             let evm_bank = EvmBank::new(
                 evm::TEST_CHAIN_ID,
                 Default::default(),
                 self.evm_state.clone().into(),
+                subchains,
             );
             let clear_logs = self
                 .feature_set
@@ -1519,20 +1516,37 @@ mod test {
                     &mut ExecuteTimings::default(),
                 ) {
                     dbg!(&e);
-                    let executor = invoke_context
-                        .deconstruct_evm()
-                        .expect("Evm executor should exist");
-                    self.evm_state
-                        .apply_failed_update(&executor.evm_backend, clear_logs);
+                    let Some((chain_id, executor)) = invoke_context.deconstruct_evm() else {
+                        // skip apply 
+                        return Err(e);
+                    };
+
+                    if let Some(chain_id) = chain_id {
+                        warn!("Skiping update on error on empty subchain.")
+                    } else {
+                        self.evm_state
+                            .apply_failed_update(&executor.evm_backend, clear_logs);
+                    };
                     return Err(e);
                 }
             }
 
             // invoke context will apply native accounts chages, but evm should be applied manually.
-            let executor = invoke_context
-                .deconstruct_evm()
-                .expect("Evm executor should exist");
-            self.evm_state = executor.evm_backend;
+            if let Some((chain_id, executor)) = invoke_context.deconstruct_evm() {
+                let mut evm_state = if let Some(chain_id) = chain_id {
+                    let main = &self.evm_state;
+
+                    info!("Updating subchain state {}", chain_id);
+                    self.subchains
+                        .entry(chain_id)
+                        .or_insert_with(|| main.clone())
+                } else {
+                    &mut self.evm_state
+                };
+
+                *evm_state = executor.evm_backend;
+            }
+
             let (accs, _contexts) = transaction_context.deconstruct();
             for acc in accs {
                 *self.native_account(acc.0) = acc.1
@@ -3225,22 +3239,46 @@ mod test {
         let mut evm_context = EvmMockContext::new(0);
         let user_id = Pubkey::new_unique();
         let user_acc = evm_context.native_account(user_id);
+        let chain_id = 22;
         user_acc.set_owner(system_program::ID);
         user_acc.set_lamports(10000000000000000);
-
-        let evm_address = crate::evm_address_for_program(user_id);
-        evm_context
+        // failed because of invalid chain id
+        let err = evm_context
             .process_instruction(crate::create_evm_subchain_account(
                 user_id,
-                22,
+                TEST_CHAIN_ID,
                 SubchainConfig::default(),
+            ))
+            .unwrap_err();
+
+        let mut config = SubchainConfig::default();
+        let evm_address = crate::evm_address_for_program(user_id);
+        config.mint.push((evm_address, 10000));
+        evm_context
+            .process_instruction(crate::create_evm_subchain_account(
+                user_id, chain_id, config,
             ))
             .unwrap();
 
-        panic!()
-        // let evm_acc = evm_context.evm_state.get_account_state(evm_address).unwrap();
-        // assert_eq!(evm_acc.owner, crate::ID);
-        // assert_eq!(evm_acc.lamports, 0);
+        let evm_acc = evm_context
+            .evm_state
+            .get_account_state(evm_address)
+            .unwrap_or_default();
+        assert_eq!(evm_acc.balance, U256::from(0));
+
+        let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
+        let evm_acc_on_sub = subchain_evm.get_account_state(evm_address).unwrap();
+        assert_eq!(evm_acc_on_sub.balance, lamports_to_gwei(10000));
+        assert_eq!(subchain_evm.get_executed_transactions().len(), 1);
+        //TODO: Check account state in native chain.
+        // failed because already exist
+        let err = evm_context
+            .process_instruction(crate::create_evm_subchain_account(
+                user_id,
+                chain_id,
+                SubchainConfig::default(),
+            ))
+            .unwrap_err();
     }
 
     #[test]
@@ -3261,15 +3299,13 @@ mod test {
         let chain_id = 2233;
         evm_context
             .process_instruction(crate::create_evm_subchain_account(
-                user_id,
-                chain_id,
-                SubchainConfig::default(),
+                user_id, chain_id, config,
             ))
             .unwrap();
 
         let tx_transfer = evm::UnsignedTransaction {
             nonce: 0u32.into(),
-            gas_price: 1u32.into(),
+            gas_price: 2000000000u32.into(),
             gas_limit: 300000u32.into(),
             action: TransactionAction::Call(to),
             value: 10u32.into(),
@@ -3288,11 +3324,17 @@ mod test {
             ))
             .is_ok());
 
-        assert!(evm_context
-            .evm_state // for subchain
-            .find_transaction_receipt(tx_hash)
-            .is_some());
+        let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
+        assert!(subchain_evm.find_transaction_receipt(tx_hash).is_some());
 
-        panic!()
+        assert_eq!(subchain_evm.get_executed_transactions().len(), 2);
+
+        let to_state = subchain_evm.get_account_state(to).unwrap();
+        assert_eq!(to_state.balance, 10u32.into());
+        let from_state = subchain_evm.get_account_state(address).unwrap();
+        assert_eq!(from_state.balance, 9999999999990u64.into());
+
+        assert!(evm_context.evm_state.get_account_state(address).is_none());
+        assert!(evm_context.evm_state.get_account_state(to).is_none());
     }
 }

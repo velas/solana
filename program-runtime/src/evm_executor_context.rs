@@ -1,4 +1,4 @@
-use std::{cell::RefCell, fmt, marker::PhantomData, rc::Rc};
+use std::{cell::RefCell, fmt, marker::PhantomData, ops::Deref, rc::Rc};
 
 use serde::{
     de::{SeqAccess, Visitor},
@@ -8,7 +8,7 @@ use serde::{
 use solana_sdk::clock::Slot;
 use std::{collections::HashMap, sync::RwLock};
 
-use evm_state::{AccountProvider, Executor};
+use evm_state::{AccountProvider, EvmBackend, Executor};
 use log::{debug, warn};
 // use solana_program_runtime::evm_executor_context::{BlockHashEvm, MAX_EVM_BLOCKHASHES};
 // use solana_runtime::{bank::log_enabled, message_processor::ProcessedMessageInfo};
@@ -102,24 +102,37 @@ pub type ChangedList = Option<(evm_state::H256, evm_state::ChangedState)>;
 
 #[derive(Debug, Default)]
 pub struct EvmChain {
-    pub(crate) chain_id: ChainID,
-    pub(crate) evm_state: RwLock<evm_state::EvmState>,
-    pub(crate) evm_changed_list: RwLock<ChangedList>,
-    pub(crate) evm_blockhashes: RwLock<BlockHashEvm>,
+    pub evm_state: RwLock<evm_state::EvmState>,
+    pub evm_changed_list: RwLock<ChangedList>,
 }
 
 impl Clone for EvmChain {
     fn clone(&self) -> Self {
         Self {
-            chain_id: self.chain_id.clone(),
             evm_state: RwLock::new(self.evm_state.read().unwrap().clone()),
             evm_changed_list: RwLock::new(self.evm_changed_list.read().unwrap().clone()),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MainChain {
+    pub chain_id: ChainID,
+    pub chain: EvmChain,
+    pub evm_blockhashes: RwLock<BlockHashEvm>,
+}
+
+impl Clone for MainChain {
+    fn clone(&self) -> Self {
+        Self {
+            chain_id: self.chain_id.clone(),
+            chain: self.chain.clone(),
             evm_blockhashes: RwLock::new(self.evm_blockhashes.read().unwrap().clone()),
         }
     }
 }
 
-impl EvmChain {
+impl MainChain {
     /// EVM Chain ID
     pub fn id(&self) -> ChainID {
         self.chain_id
@@ -128,21 +141,6 @@ impl EvmChain {
     pub fn set_id(&mut self, id: ChainID) {
         self.chain_id = id;
     }
-
-    /// EVM State Read-Only Lock Guard
-    pub fn state<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, evm_state::EvmState> {
-        self.evm_state
-            .read()
-            .expect("EVM State RwLock was poisoned")
-    }
-
-    /// EVM State Write Lock Guard
-    pub fn state_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, evm_state::EvmState> {
-        self.evm_state
-            .write()
-            .expect("EVM State RwLock was poisoned")
-    }
-
     /// EVM Blockhashes Raw Lock
     pub fn blockhashes_raw<'a>(&'a self) -> &'a RwLock<BlockHashEvm> {
         &self.evm_blockhashes
@@ -163,6 +161,43 @@ impl EvmChain {
             .expect("EVM Blockhashes RwLock was poisoned")
     }
 
+    /// EVM State Read-Only Lock Guard
+    pub fn state<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, evm_state::EvmState> {
+        self.chain.state()
+    }
+
+    /// EVM State Write Lock Guard
+    pub fn state_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, evm_state::EvmState> {
+        self.state_write()
+    }
+
+    /// EVM Blockhashes Read-Only Lock Guard
+    pub fn changed_list<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, ChangedList> {
+        self.changed_list()
+    }
+
+    // TODO: do not expose WriteGuard, do setter
+    /// EVM Blockhashes Write Lock Guard
+    pub fn changed_list_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, ChangedList> {
+        self.changed_list_write()
+    }
+}
+
+impl EvmChain {
+    /// EVM State Read-Only Lock Guard
+    pub fn state<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, evm_state::EvmState> {
+        self.evm_state
+            .read()
+            .expect("EVM State RwLock was poisoned")
+    }
+
+    /// EVM State Write Lock Guard
+    pub fn state_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, evm_state::EvmState> {
+        self.evm_state
+            .write()
+            .expect("EVM State RwLock was poisoned")
+    }
+
     /// EVM Blockhashes Read-Only Lock Guard
     pub fn changed_list<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, ChangedList> {
         self.evm_changed_list
@@ -181,7 +216,7 @@ impl EvmChain {
 
 #[derive(Debug, Default, PartialEq, Clone)]
 pub struct EvmBank {
-    pub(crate) main_chain: EvmChain,
+    pub(crate) main_chain: MainChain,
     pub(crate) side_chains: HashMap<ChainID, EvmChain>,
 }
 
@@ -190,23 +225,68 @@ impl EvmBank {
         evm_chain_id: ChainID,
         evm_blockhashes: BlockHashEvm,
         evm_state: evm_state::EvmState,
+        side_chains: HashMap<ChainID, evm_state::EvmState>,
     ) -> Self {
         Self {
-            main_chain: EvmChain {
+            main_chain: MainChain {
                 chain_id: evm_chain_id,
-                evm_state: RwLock::new(evm_state),
-                evm_changed_list: RwLock::new(None),
                 evm_blockhashes: RwLock::new(evm_blockhashes),
+                chain: EvmChain {
+                    evm_state: RwLock::new(evm_state),
+                    evm_changed_list: RwLock::new(None),
+                },
             },
-            side_chains: Default::default(),
+            side_chains: side_chains
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        k,
+                        EvmChain {
+                            evm_state: RwLock::new(v),
+                            evm_changed_list: RwLock::new(None),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+    pub fn from_parent(
+        evm_chain_id: ChainID,
+        evm_blockhashes: BlockHashEvm,
+        evm_state: evm_state::EvmState,
+        side_chains: HashMap<ChainID, EvmChain>,
+    ) -> Self {
+        Self {
+            main_chain: MainChain {
+                chain_id: evm_chain_id,
+                evm_blockhashes: RwLock::new(evm_blockhashes),
+                chain: EvmChain {
+                    evm_state: RwLock::new(evm_state),
+                    evm_changed_list: RwLock::new(None),
+                },
+            },
+            side_chains,
         }
     }
 
-    pub fn main_chain(&self) -> &EvmChain {
+    pub fn main_chain(&self) -> &MainChain {
         &self.main_chain
     }
 
-    pub fn main_chain_mut(&mut self) -> &mut EvmChain {
+    pub fn side_chains(&self) -> &HashMap<ChainID, EvmChain> {
+        &self.side_chains
+    }
+
+    pub fn chain_state(&self, chain_id: ChainID) -> &EvmChain {
+        if chain_id == self.main_chain.id() {
+            panic!("Main chain state should be accessed via main_chain() method");
+        }
+        self.side_chains
+            .get(&chain_id)
+            .expect("Chain does not exist")
+        
+    }
+    pub fn main_chain_mut(&mut self) -> &mut MainChain {
         &mut self.main_chain
     }
 }
@@ -216,7 +296,12 @@ impl PartialEq for EvmChain {
         let last_root_self = self.state().last_root();
         let last_root_other = other.state().last_root();
 
-        self.chain_id == other.chain_id && last_root_self == last_root_other
+        last_root_self == last_root_other
+    }
+}
+impl PartialEq for MainChain {
+    fn eq(&self, other: &Self) -> bool {
+        self.chain_id == other.chain_id && self.chain == other.chain
     }
 }
 
@@ -244,17 +329,19 @@ pub enum PatchStrategy {
     SetNew,
 }
 
+type Chain = Option<ChainID>;
 //
 // 1. Init state: in solana::Bank::evm -> EvmExecutorContext::new()
 // 2. State for tx_batch = evm_patch::new(init_state)
 // 3. intermediate state for one tx = evm_executor::new(evm_patch)
 pub struct EvmExecutorContext {
+    // TODO: share with bank
     evm: EvmBank,
 
-    // TODO: evm_patches: HashMap<ChainID, EvmPatch>,
-    evm_patch: Option<EvmPatch>,
+    // None chain_id = main chain
+    evm_patches: HashMap<Chain, EvmPatch>,
 
-    active_executor: Option<Rc<RefCell<Executor>>>,
+    active_executor: Option<(Chain, Rc<RefCell<Executor>>)>,
 
     // extract into struct
     feature_set: evm_state::executor::FeatureSet,
@@ -292,6 +379,14 @@ impl ChainParam {
     pub fn is_main(&self) -> bool {
         matches!(self, ChainParam::GetMainChain)
     }
+    // Return None if main chain
+    pub fn chain_id(&self) -> Chain {
+        match self {
+            ChainParam::GetMainChain => None,
+            ChainParam::CreateSubchain { chain_id } => Some(*chain_id),
+            ChainParam::GetSubchain { chain_id, .. } => Some(*chain_id),
+        }
+    }
 }
 
 impl EvmExecutorContext {
@@ -310,7 +405,7 @@ impl EvmExecutorContext {
     ) -> Self {
         Self {
             evm,
-            evm_patch: None,
+            evm_patches: HashMap::new(),
             feature_set,
             unix_timestamp,
             bank_slot,
@@ -327,45 +422,134 @@ impl EvmExecutorContext {
     }
 
     pub fn get_executor(&mut self, params: ChainParam) -> Option<Rc<RefCell<Executor>>> {
-        // TODO: Check chain_id
+        let chain_id = params.chain_id();
+
         if self.active_executor.is_some() {
-            return self.active_executor.clone();
+            if self.active_executor.as_ref().unwrap().0 != chain_id {
+                warn!(
+                    "Executor already created for chain_id={:?}, ignoring.",
+                    self.active_executor.as_ref().unwrap().0
+                );
+
+                // return Err(MultipleExecutors)
+                return None;
+            }
+            return self.active_executor.clone().map(|v| v.1);
         }
+
         // append to old patch if exist, or create new, from existing evm state
         // TODO: Can be inlined?
-        self.evm_patch = self.evm_patch.take().or_else(|| match self.context_type {
-            EvmExecutorContextType::Execution => self.take_evm_state_cloned(),
-            EvmExecutorContextType::Simulation => self.take_evm_state_for_simulation(),
-        });
+        let patch = self.evm_patches.remove(&chain_id);
 
-        if let Some(state) = &self.evm_patch {
+        if patch.is_some() && matches!(params, ChainParam::CreateSubchain { .. }) {
+            // return Err executor already exist
+            return None;
+        }
+        let patch = patch.or_else(|| self.get_evm_state(&params));
+
+        let last_hashes = self.get_last_hashes(&params); // NOTE: 8kb
+
+        if let Some(state) = patch {
             let evm_executor = evm_state::Executor::with_config(
                 state.clone(),
-                evm_state::ChainContext::new(
-                    self.evm.main_chain().blockhashes().get_hashes().clone(), // NOTE: 8kb
-                ),
+                evm_state::ChainContext::new(last_hashes),
                 evm_state::EvmConfig::new(
-                    self.evm.main_chain().id(),
+                    params
+                        .chain_id()
+                        .unwrap_or_else(|| self.evm.main_chain().id()),
                     self.is_evm_burn_fee_activated,
                 ),
                 self.feature_set,
             );
 
-            let evm_executor = Some(Rc::new(RefCell::new(evm_executor)));
-            self.active_executor = evm_executor.clone();
+            let evm_executor = Rc::new(RefCell::new(evm_executor));
+            log::trace!("Executor created for chain_id={:?}", chain_id);
+            self.evm_patches.insert(chain_id, state);
+            self.active_executor = Some((chain_id, evm_executor.clone()));
 
-            evm_executor
+            Some(evm_executor)
         } else {
-            warn!("Executing evm transaction on already locked bank, ignoring.");
             None
+        }
+    }
+    fn get_last_hashes(&self, params: &ChainParam) -> [evm_state::H256; MAX_EVM_BLOCKHASHES] {
+        match params {
+            ChainParam::CreateSubchain { chain_id } => {
+                [evm_state::H256::zero(); MAX_EVM_BLOCKHASHES]
+            }
+            ChainParam::GetSubchain {
+                chain_id,
+                subchain_hashes,
+            } => (subchain_hashes.deref()).clone(),
+            ChainParam::GetMainChain => self.evm.main_chain().blockhashes().get_hashes().clone(),
+        }
+    }
+    fn get_evm_state_from_lock(
+        &self,
+        state: std::sync::RwLockReadGuard<'_, evm_state::EvmState>,
+    ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
+        let lock = match self.context_type {
+            EvmExecutorContextType::Execution => self.take_evm_state_cloned(state),
+            EvmExecutorContextType::Simulation => self.take_evm_state_for_simulation(state),
+        };
+        if lock.is_none() {
+            warn!("Executing evm transaction on already locked bank.");
+        }
+        lock
+    }
+
+    fn get_evm_state(
+        &self,
+        params: &ChainParam,
+    ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
+        match params {
+            ChainParam::GetSubchain {
+                chain_id,
+                subchain_hashes,
+            } => {
+                let subchain_state = self
+                    .evm
+                    .side_chains
+                    .get(chain_id)
+                    .map(|c| c.state())
+                    .and_then(|s| self.get_evm_state_from_lock(s));
+                if subchain_state.is_none() {
+                    warn!("Can't create new executor, for non-initialized subchain.");
+                }
+                subchain_state
+            }
+            ChainParam::GetMainChain => self.get_evm_state_from_lock(self.evm.main_chain().state()),
+
+            ChainParam::CreateSubchain { chain_id } => {
+                let subchain_state = self
+                    .evm
+                    .side_chains
+                    .get(chain_id)
+                    .map(|c| c.state())
+                    .and_then(|s| self.get_evm_state_from_lock(s));
+
+                if subchain_state.is_some() {
+                    warn!("Can't get executor, for already initialized subchain.");
+                    return None;
+                }
+                // recreate from main chain
+                let main_chain_state = self.get_evm_state_from_lock(self.evm.main_chain().state());
+
+                // Use main_chain kvs for new chain, but set empty trie hash root
+                // TODO: new constructor EvmBackend::new_subchain(..)
+                main_chain_state.map(|s| EvmBackend {
+                    kvs: s.kvs,
+                    state: evm_state::Incomming::genesis_from_state(evm_state::empty_trie_hash()),
+                })
+            }
         }
     }
 
     // for test purposes
-    pub fn take_executor(&mut self) -> Option<Executor> {
+    pub fn take_executor(&mut self) -> Option<(Option<ChainID>, Executor)> {
         self.active_executor
             .take()
-            .and_then(|rc| Rc::try_unwrap(rc).ok().map(|i| i.into_inner()))
+            .and_then(|rc| Rc::try_unwrap(rc.1).ok().map(|i| (rc.0, i.into_inner())))
     }
 
     // TODO: On cleanup:
@@ -380,23 +564,26 @@ impl EvmExecutorContext {
     // }
 
     pub fn cleanup(&mut self, strategy: PatchStrategy) {
-        let executor: Executor = {
-            let executor = self
+        let (chain_id, executor): (_, Executor) = {
+            let (chain_id, executor) = self
                 .active_executor
                 .take()
                 .expect("Executor was not created, nothing to deconstruct");
-            Rc::try_unwrap(executor)
-                .map(|e| e.into_inner())
-                .expect("Reference to Active Executor was not freed")
+            (
+                chain_id,
+                Rc::try_unwrap(executor)
+                    .map(|e| e.into_inner())
+                    .expect("Reference to Active Executor was not freed"),
+            )
         };
 
         let new_patch = executor.deconstruct();
+        let mut old_patch = self
+            .evm_patches
+            .remove(&chain_id)
+            .expect("Evm patch should exist, on transaction execution.");
 
-        let before = self
-            .evm_patch
-            .as_ref()
-            .map(|p| p.last_root())
-            .unwrap_or_default();
+        let before = old_patch.last_root();
         let after = new_patch.last_root();
 
         log::trace!(
@@ -407,23 +594,24 @@ impl EvmExecutorContext {
         // On error save only transaction and increase nonce.
         match strategy {
             PatchStrategy::ApplyFailed => {
-                self.evm_patch
-                    .as_mut()
-                    .expect("Evm patch should exist, on transaction execution.")
-                    .apply_failed_update(&new_patch, self.clear_logs);
+                old_patch.apply_failed_update(&new_patch, self.clear_logs);
             }
             PatchStrategy::SetNew => {
-                self.evm_patch = Some(new_patch);
+                old_patch = new_patch;
             }
         }
+        self.evm_patches.insert(chain_id, old_patch);
     }
 
-    pub fn get_patch_cloned(&self) -> Option<EvmPatch> {
-        self.evm_patch.clone()
+    pub fn deconstruct_to_patches(self) -> HashMap<Option<ChainID>, EvmPatch> {
+        self.evm_patches.clone()
     }
 
-    fn take_evm_state_cloned(&self) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
-        match &*self.evm.main_chain().state() {
+    fn take_evm_state_cloned(
+        &self,
+        state: std::sync::RwLockReadGuard<'_, evm_state::EvmState>,
+    ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
+        match &*state {
             evm_state::EvmState::Incomming(i) => Some(i.clone()),
             evm_state::EvmState::Committed(_) => {
                 warn!(
@@ -437,8 +625,11 @@ impl EvmExecutorContext {
         }
     }
 
-    fn take_evm_state_for_simulation(&self) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
-        match &*self.evm.main_chain().state() {
+    fn take_evm_state_for_simulation(
+        &self,
+        state: std::sync::RwLockReadGuard<'_, evm_state::EvmState>,
+    ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
+        match &*state {
             evm_state::EvmState::Incomming(i) => Some(i.clone()),
             evm_state::EvmState::Committed(c) => {
                 debug!(

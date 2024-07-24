@@ -544,11 +544,13 @@ where
         .cleanup_slots(bank_fields.slot, bank_fields.evm_persist_fields.last_root())
         .map_err(|e| Error::custom(format!("Unable to register slot for evm root {}", e)))?;
 
+    let side_chains = todo!()
     // if limit_load_slot_count_from_snapshot is set, then we need to side-step some correctness checks beneath this call
     let debug_do_not_add_builtins = limit_load_slot_count_from_snapshot.is_some();
 
     let bank = Bank::new_from_fields(
         evm_state,
+        side_chains,
         bank_rc,
         genesis_config,
         bank_fields,

@@ -951,7 +951,7 @@ mod evmtests {
         // check that revert keep tx in history, but balances are set to zero
         assert_eq!(evm_state.processed_tx_len(), 0);
 
-        let subchain_evm_state = todo!(evm_state);
+        let subchain_evm_state = bank.evm.chain_state(TEST_CHAIN_ID + 1).state();
 
         assert_eq!(subchain_evm_state.processed_tx_len(), 1);
         let account = bank.get_account(&mint_keypair.pubkey()).unwrap();

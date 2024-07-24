@@ -257,7 +257,8 @@ impl<'a> InvokeContext<'a> {
         }
     }
 
-    pub fn deconstruct_evm(self) -> Option<evm_state::Executor> {
+    // Only for tests
+    pub fn deconstruct_evm(self) -> Option<(Option<ChainID>, evm_state::Executor)> {
         self.evm_executor_context.and_then(|e| e.take_executor())
     }
 

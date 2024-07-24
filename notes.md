@@ -2,19 +2,19 @@
 
 ## Core and Runtime
 
-- IX: Create subchain account - (native_invoke + check big_storage)
+- IX: Create subchain account - (native_invoke + check big_storage) +
   
   **3 days**
 
-- IX: Execute subchain tx - (invoke_context.create_executor(chain_id), (executor without precompiles on subchain))
+- IX: Execute subchain tx - (invoke_context.create_executor(chain_id), (executor without precompiles on subchain)) + 
   
   **4 days**
 
-- In core - patch -> Multi patch (Option<EvmPatch> -> HashMap<Chainid, EvmPatch>)
+- In core - patch -> Multi patch (Option<EvmPatch> -> HashMap<Chainid, EvmPatch>) +
   
   **1 day**
 
-- in core - multi sysvar -> blockhashes (\* KVS or SYSVARs or EVM_STATE_ACCOUNT). (on bank.freeze() -> for subchain in subchains{})
+- in core - multi sysvar -> blockhashes (\* KVS or SYSVARs or EVM_STATE_ACCOUNT). (on bank.freeze() -> for subchain in subchains{}) +
   
   **1 week**
 <!--
@@ -35,7 +35,7 @@
 ```
 -->
 
-- in core - last_root for multichains
+- in core - last_root for multichains -
   
   **3 days**
 
@@ -45,7 +45,7 @@
   ```
 -->
 
-- in core: feature activation
+- in core: feature activation - 
   
   **3 days**
 
@@ -68,9 +68,9 @@
   
   **4-5 weeks+**
 
-- deconstruct evm
+- deconstruct evm + 
 
-- subchain execute tx
+- subchain execute tx 
 
 - feature activation
 
@@ -88,5 +88,36 @@ Create EVM Subchain config and execute mainchain/subchain txs, make sure precomp
 2. Sanity check - on create subchain create - check if chainid not main.
 3. Test: for native swap and evm swap 
 4. test: for precompiles (evm loader program).
+5. Load evm state from disk
+6. validate evm-state
 
 Update transaction-statuses
+
+1. Tokenomics - how many tokens? 1 mill vlx? + cap for fees = Mixed fee payer model (burn vlx from evm_state_account + charge_XXX_token_from_user_in_subchain_evm)
+2. EVM fee for bridge ?
+3. chain_id - blacklist (chainlist.org top100) (PREFIX V 0x56)
+
+
+TODO: Add name chain 
+
+# Chain Manager CLI
+## generate-config
+
+Choose a name for the chain: 
+Pick a name for the token:
+Select a Chain ID (should be unique, and start with 0x56): 0x56_
+Hardfork version (default: istanbul):
+
+Minting address:
+Balance (in $NAME$): 
+One more minting address (empty if skip):
+
+Do you want to add optional fields? (y/n)
+Select a token symbol:
+RPC URL: ?
+
+## setup-chain:
+
+## deploy-bridge:
+
+

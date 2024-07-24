@@ -685,7 +685,7 @@ pub struct LoadAndExecuteTransactionsOutput {
     pub executed_with_successful_result_count: usize,
     pub signature_count: u64,
     pub error_counters: TransactionErrorMetrics,
-    pub evm_patch: Option<evm_state::EvmBackend<evm_state::Incomming>>,
+    pub evm_patch: HashMap<Option<ChainID>, evm_state::EvmBackend<evm_state::Incomming>>,
 }
 
 #[derive(Debug, Clone)]
@@ -972,6 +972,7 @@ pub(crate) struct BankFieldsToDeserialize {
     pub(crate) evm_chain_id: ChainID,
     pub(crate) evm_persist_fields: evm_state::EvmPersistState,
     pub(crate) evm_blockhashes: BlockHashEvm,
+    pub(crate) evm_side_chains: HashMap<ChainID, evm_state::EvmPersistState>,
     pub(crate) accounts_data_len: u64,
 }
 
@@ -1736,10 +1737,11 @@ impl Bank {
             epoch,
             blockhash_queue,
 
-            evm: EvmBank::new(
+            evm: EvmBank::from_parent(
                 parent.evm.main_chain().id(),
                 parent.evm.main_chain().blockhashes().clone(),
                 evm_state,
+                parent.evm.side_chains().clone(),
             ),
 
             // TODO: clean this up, so much special-case copying...
@@ -2049,6 +2051,7 @@ impl Bank {
     #[allow(clippy::float_cmp)]
     pub(crate) fn new_from_fields(
         evm_state: evm_state::EvmState,
+        side_chains: HashMap<ChainID, evm_state::EvmState>,
         bank_rc: BankRc,
         genesis_config: &GenesisConfig,
         fields: BankFieldsToDeserialize,
@@ -2067,7 +2070,12 @@ impl Bank {
             blockhash_queue: RwLock::new(fields.blockhash_queue),
             // ANCHOR - VELAS
             // TODO: deserialize chain details from snapshot
-            evm: EvmBank::new(fields.evm_chain_id, fields.evm_blockhashes, evm_state),
+            evm: EvmBank::new(
+                fields.evm_chain_id,
+                fields.evm_blockhashes,
+                evm_state,
+                side_chains,
+            ),
             ancestors: Ancestors::from(&fields.ancestors),
             hash: RwLock::new(fields.hash),
             parent_hash: fields.parent_hash,
@@ -4462,7 +4470,7 @@ impl Bank {
             signature_count,
             error_counters,
             // TODO: Destruct evm_executor_context
-            evm_patch: evm_executor_context.get_patch_cloned(),
+            evm_patch: evm_executor_context.deconstruct_to_patches(),
         }
     }
 
@@ -4692,7 +4700,7 @@ impl Bank {
         lamports_per_signature: u64,
         counts: CommitTransactionCounts,
         timings: &mut ExecuteTimings,
-        evm_patch: Option<evm_state::EvmBackend<evm_state::Incomming>>,
+        evm_patch: HashMap<Option<ChainID>, evm_state::EvmBackend<evm_state::Incomming>>,
     ) -> TransactionResults {
         assert!(
             !self.freeze_started(),
@@ -4757,10 +4765,18 @@ impl Bank {
         self.update_stakes_cache(sanitized_txs, &execution_results, loaded_txs);
         update_stakes_cache_time.stop();
 
-        if let Some(patch) = evm_patch {
-            let mut evm_state = self.evm.main_chain().state_write();
-            trace!("Updating evm state, before = {:?}", *evm_state);
-            trace!("Updating evm state, after = {:?}", patch);
+        for (chain, patch) in evm_patch {
+            let chain_name = chain
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "main".to_string());
+            let mut evm_state = if chain.is_none() {
+                self.evm.main_chain().state_write()
+            } else {
+                self.evm.chain_state(chain.unwrap()).state_write()
+            };
+
+            trace!("Updating evm {chain_name} state, before = {:?}", *evm_state);
+            trace!("Updating evm {chain_name} state, after = {:?}", patch);
             *evm_state = patch.into()
         }
 
