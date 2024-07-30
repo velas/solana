@@ -1,6 +1,8 @@
 //! The solana-program-test provides a BanksClient-based test framework BPF programs
 #![allow(clippy::integer_arithmetic)]
 
+use std::collections::HashMap;
+
 // Export tokio for test clients
 pub use tokio;
 use tokio::task::JoinError;
@@ -442,7 +444,7 @@ fn setup_fees(bank: Bank) -> Bank {
             signature_count: 1,
         },
         &mut ExecuteTimings::default(),
-        None,
+        HashMap::new(),
     );
     assert_eq!(bank.signature_count(), 1);
 

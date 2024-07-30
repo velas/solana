@@ -945,7 +945,7 @@ mod tests {
             let first_root = backend.last_root();
             backend
                 .kvs()
-                .register_slot(slot, first_root, false)
+                .register_slot(slot, first_root, vec![], false)
                 .unwrap();
 
             let mut executor = Executor::with_config(
@@ -986,8 +986,8 @@ mod tests {
             assert!(backend.kvs().check_root_exist(root));
             assert!(backend.kvs().check_root_exist(first_root));
             if gc {
-                let hash = backend.kvs().purge_slot(slot).unwrap().unwrap();
-                backend.kvs().gc_try_cleanup_account_hashes(&[hash]);
+                let hashes = backend.kvs().purge_slot(slot).unwrap();
+                backend.kvs().gc_try_cleanup_account_hashes(&hashes);
                 // on gc it will be removed
                 assert!(!backend.kvs().check_root_exist(first_root));
             } else {

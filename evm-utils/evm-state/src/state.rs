@@ -610,12 +610,24 @@ impl EvmState {
         EvmState::Incomming(b)
     }
     // Request Unique reference to make sure caller own evm-state instance.
-    pub fn register_slot(&mut self, slot: u64) -> Result<(), anyhow::Error> {
-        Ok(self.kvs().register_slot(slot, self.last_root(), false)?)
+    pub fn register_slot(
+        &mut self,
+        slot: u64,
+        subchain_roots: Vec<H256>,
+    ) -> Result<(), anyhow::Error> {
+        Ok(self
+            .kvs()
+            .register_slot(slot, self.last_root(), subchain_roots, false)?)
     }
     // Mark changed state in slot.
-    pub fn reregister_slot(&mut self, slot: u64) -> Result<(), anyhow::Error> {
-        Ok(self.kvs().register_slot(slot, self.last_root(), true)?)
+    pub fn reregister_slot(
+        &mut self,
+        slot: u64,
+        subchain_roots: Vec<H256>,
+    ) -> Result<(), anyhow::Error> {
+        Ok(self
+            .kvs()
+            .register_slot(slot, self.last_root(), subchain_roots, true)?)
     }
 
     pub fn load_from<P: AsRef<Path>>(

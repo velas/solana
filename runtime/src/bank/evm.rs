@@ -101,10 +101,13 @@ impl Bank {
             let mut w_evm_blockhash_queue = self.evm.main_chain().blockhashes_write();
             *self.evm.main_chain().changed_list_write() = Some((old_root, changes));
 
+            let subchain_roots = self.evm.subchain_roots();
+
+            // TODO: feature_subchain
             self.evm
                 .main_chain()
                 .state_write()
-                .reregister_slot(self.slot())
+                .reregister_slot(self.slot(), subchain_roots)
                 .expect("Failed to change slot");
             w_evm_blockhash_queue.insert_hash(hash);
             if self.fix_recent_blockhashes_sysvar_evm() {

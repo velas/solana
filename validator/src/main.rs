@@ -891,28 +891,28 @@ pub fn main() {
                        download from other validators"),
         )
         
-        .arg(
-            Arg::with_name("incremental_snapshots")
-                .long("incremental-snapshots")
-                .takes_value(false)
-                .hidden(true)
-                .conflicts_with("no_incremental_snapshots")
-                .help("Enable incremental snapshots")
-                .long_help("Enable incremental snapshots by setting this flag. \
-                   When enabled, --snapshot-interval-slots will set the \
-                   incremental snapshot interval. To set the full snapshot \
-                   interval, use --full-snapshot-interval-slots.")
-         )
-        .arg(
-            Arg::with_name("no_incremental_snapshots")
-                .long("no-incremental-snapshots")
-                .takes_value(false)
-                .help("Disable incremental snapshots")
-                .long_help("Disable incremental snapshots by setting this flag. \
-                   When enabled, --snapshot-interval-slots will set the \
-                   incremental snapshot interval. To set the full snapshot \
-                   interval, use --full-snapshot-interval-slots.")
-         )
+        // .arg(
+        //     Arg::with_name("incremental_snapshots")
+        //         .long("incremental-snapshots")
+        //         .takes_value(false)
+        //         .hidden(true)
+        //         .conflicts_with("no_incremental_snapshots")
+        //         .help("Enable incremental snapshots")
+        //         .long_help("Enable incremental snapshots by setting this flag. \
+        //            When enabled, --snapshot-interval-slots will set the \
+        //            incremental snapshot interval. To set the full snapshot \
+        //            interval, use --full-snapshot-interval-slots.")
+        //  )
+        // .arg(
+        //     Arg::with_name("no_incremental_snapshots")
+        //         .long("no-incremental-snapshots")
+        //         .takes_value(false)
+        //         .help("Disable incremental snapshots")
+        //         .long_help("Disable incremental snapshots by setting this flag. \
+        //            When enabled, --snapshot-interval-slots will set the \
+        //            incremental snapshot interval. To set the full snapshot \
+        //            interval, use --full-snapshot-interval-slots.")
+        //  )
         .arg(
             Arg::with_name("incremental_snapshot_interval_slots")
                 .long("incremental-snapshot-interval-slots")
@@ -2278,6 +2278,7 @@ pub fn main() {
     if matches.is_present("no_check_vote_account") {
         info!("vote account sanity checks are no longer performed by default. --no-check-vote-account is deprecated and can be removed from the command line");
     }
+    let no_incremental_snapshot = true; // matches.is_present("no_incremental_snapshots");
     let rpc_bootstrap_config = bootstrap::RpcBootstrapConfig {
         no_genesis_fetch: matches.is_present("no_genesis_fetch"),
         no_snapshot_fetch: matches.is_present("no_snapshot_fetch"),
@@ -2290,7 +2291,7 @@ pub fn main() {
             "max_genesis_archive_unpacked_size",
             u64
         ),
-        incremental_snapshot_fetch: !matches.is_present("no_incremental_snapshots"),
+        incremental_snapshot_fetch: !no_incremental_snapshot,
     };
 
     let private_rpc = matches.is_present("private_rpc");
@@ -2851,7 +2852,7 @@ pub fn main() {
         value_t_or_exit!(matches, "incremental_snapshot_interval_slots", u64);
     let (full_snapshot_archive_interval_slots, incremental_snapshot_archive_interval_slots) =
         if incremental_snapshot_interval_slots > 0 {
-            if !matches.is_present("no_incremental_snapshots") {
+            if !no_incremental_snapshot {
                 (
                     value_t_or_exit!(matches, "full_snapshot_interval_slots", u64),
                     incremental_snapshot_interval_slots,

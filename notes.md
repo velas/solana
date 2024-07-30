@@ -121,3 +121,5 @@ RPC URL: ?
 ## deploy-bridge:
 
 
+Todo: Add test for register slot with subchains
+Todo: disable incremental for now

@@ -175,22 +175,35 @@ pub fn parse_evm(
             })
         }
         EvmInstruction::EvmSubchain(evm_subchain) => match evm_subchain {
-            EvmSubChain::CreateAccount { id, config } => Ok(ParsedInstructionEnum {
+            EvmSubChain::CreateAccount { chain_id, config } => Ok(ParsedInstructionEnum {
                 instruction_type: "evmSubchainCreateAccount".to_string(),
                 info: json!({
-                    "id": id,
+                    "chaind_id": chain_id,
                     "config": config
                 }),
             }),
-            EvmSubChain::ExecuteTransaction { tx } => match tx {
-                ExecuteTransaction::Signed { tx: Some(evm_tx) } => todo!(),
-                ExecuteTransaction::Signed { tx: None } => todo!(),
-                ExecuteTransaction::ProgramAuthorized {
-                    tx: Some(evm_tx),
-                    from,
-                } => todo!(),
-                ExecuteTransaction::ProgramAuthorized { tx: None, from } => todo!(),
-            },
+            EvmSubChain::ExecuteTransaction { chain_id, tx } => {
+                let info = match tx {
+                    ExecuteTransaction::Signed { tx: Some(evm_tx) } => json!({
+                        "transaction": RPCTransaction::from_transaction(evm_tx.into()).map_err(|_|ParseInstructionError::InstructionKeyMismatch(
+                        ParsableProgram::Evm,
+                        ))?,
+                        "chainId": chain_id,
+                    }),
+                    ExecuteTransaction::Signed { tx: None } => json!({
+                        "storageAccount": account_keys[instruction.accounts[2] as usize].to_string(),
+                        "chainId": chain_id,
+                    }),
+                    _ => json!({
+                        "programAuthorized": true,
+                        "chainId": chain_id,
+                    }),
+                };
+                Ok(ParsedInstructionEnum {
+                    instruction_type: "evmSubchainExecuteTransaction".to_string(),
+                    info,
+                })
+            }
         },
     }
 }

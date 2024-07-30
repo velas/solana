@@ -71,7 +71,7 @@ fn add_some_and_advance(state: &mut EvmBackend<Incomming>, params: &Params) {
 
         state
             .kvs()
-            .register_slot(slot, state.last_root(), false)
+            .register_slot(slot, state.last_root(), vec![], false)
             .unwrap();
 
         if params.with_gc {
@@ -133,6 +133,7 @@ fn fill_bd_with_gc_squash(c: &mut Criterion) {
 }
 
 fn fill_new_db_then_backup(c: &mut Criterion) {
+    let _ = simple_logger::SimpleLogger::default().init();
     let mut group = c.benchmark_group("fill then backup once");
     group.sample_size(10);
 

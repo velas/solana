@@ -168,18 +168,18 @@ impl MainChain {
 
     /// EVM State Write Lock Guard
     pub fn state_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, evm_state::EvmState> {
-        self.state_write()
+        self.chain.state_write()
     }
 
     /// EVM Blockhashes Read-Only Lock Guard
     pub fn changed_list<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, ChangedList> {
-        self.changed_list()
+        self.chain.changed_list()
     }
 
     // TODO: do not expose WriteGuard, do setter
     /// EVM Blockhashes Write Lock Guard
     pub fn changed_list_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, ChangedList> {
-        self.changed_list_write()
+        self.chain.changed_list_write()
     }
 }
 
@@ -269,12 +269,23 @@ impl EvmBank {
         }
     }
 
+    pub fn kvs(&self) -> evm_state::Storage {
+        self.main_chain.state().kvs().clone()
+    }
+
     pub fn main_chain(&self) -> &MainChain {
         &self.main_chain
     }
 
     pub fn side_chains(&self) -> &HashMap<ChainID, EvmChain> {
         &self.side_chains
+    }
+
+    pub fn subchain_roots(&self) -> Vec<evm_state::H256> {
+        self.side_chains
+            .values()
+            .map(|c| c.state().last_root())
+            .collect()
     }
 
     pub fn chain_state(&self, chain_id: ChainID) -> &EvmChain {
@@ -284,7 +295,6 @@ impl EvmBank {
         self.side_chains
             .get(&chain_id)
             .expect("Chain does not exist")
-        
     }
     pub fn main_chain_mut(&mut self) -> &mut MainChain {
         &mut self.main_chain
@@ -472,18 +482,20 @@ impl EvmExecutorContext {
             None
         }
     }
+
     fn get_last_hashes(&self, params: &ChainParam) -> [evm_state::H256; MAX_EVM_BLOCKHASHES] {
         match params {
-            ChainParam::CreateSubchain { chain_id } => {
+            ChainParam::CreateSubchain { chain_id: _ } => {
                 [evm_state::H256::zero(); MAX_EVM_BLOCKHASHES]
             }
             ChainParam::GetSubchain {
-                chain_id,
+                chain_id: _,
                 subchain_hashes,
             } => (subchain_hashes.deref()).clone(),
             ChainParam::GetMainChain => self.evm.main_chain().blockhashes().get_hashes().clone(),
         }
     }
+
     fn get_evm_state_from_lock(
         &self,
         state: std::sync::RwLockReadGuard<'_, evm_state::EvmState>,

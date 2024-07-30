@@ -550,21 +550,52 @@ impl Storage<OptimisticTransactionDB> {
             .map(|v| v.try_into().unwrap_or_default())?)
     }
 
+    // Key that is used to seperate subchain roots from main roots.
+    fn subchain_key(slot: u64) -> [u8; 10] {
+        let mut bytes = [0xff; 10];
+        bytes[2..].copy_from_slice(&slot.to_be_bytes());
+        bytes
+    }
+
+    fn hash_array_to_bytes(hashes: &[H256]) -> Vec<u8> {
+        let mut result = Vec::with_capacity(hashes.len() * 32);
+        for hash in hashes {
+            result.extend_from_slice(hash.as_ref());
+        }
+        result
+    }
+
+    fn hash_array_from_bytes(bytes: &[u8]) -> Vec<H256> {
+        if bytes.len() % 32 != 0 {
+            panic!("Invalid bytes length");
+        }
+        let mut result = Vec::with_capacity(bytes.len() / 32);
+        for chunk in bytes.chunks(32) {
+            let hash = H256::from_slice(chunk);
+            result.push(hash);
+        }
+        result
+    }
+
     // Because solana handle each bank independently.
     // We also inherit this behaviour.
     /// Mark slot as removed, also find root_hash that correspond to this bank, and decrement its counter.
-    /// Return root_hash if it counter == 0 after removing
-    pub fn purge_slot(&self, slot: u64) -> Result<Option<H256>> {
+    /// Also find all subchain roots.
+    /// Return array of root_hashes for which counters == 0 after removing slot.
+    pub fn purge_slot(&self, slot: u64) -> Result<Vec<H256>> {
         // TODO: clever retry on purge slot failure (if transaction conflict).
         // TODO: also make some retry on RootCleanup manager.
         if !self.gc_enabled {
-            return Ok(None);
+            return Ok(vec![]);
         }
         let slots_cf = self.cf::<SlotsRoots>();
         let mut tx = self.db().transaction();
         let trie = self.rocksdb_trie_handle();
         let val = tx.get_cf(slots_cf, slot.to_be_bytes())?;
-        let remove_root = if let Some(root) = val {
+
+        let mut removed_roots = vec![];
+
+        if let Some(root) = val {
             let root = H256::from_slice(root.as_ref());
 
             let counter = trie.db.get_counter_in_tx(&mut tx, root)?;
@@ -572,23 +603,42 @@ impl Storage<OptimisticTransactionDB> {
             trie.db.decrease(&mut tx, root)?;
             // Return root if it counter was == 1
             if counter <= 1 {
-                Some(root)
-            } else {
-                None
+                removed_roots.push(root)
             }
         } else {
             info!("Purge slot:{} without root data.", slot);
-            None
         };
 
+        let subchain_val = tx.get_cf(slots_cf, Self::subchain_key(slot))?;
+
         tx.delete_cf(slots_cf, slot.to_be_bytes())?;
+
+        if let Some(bytes) = subchain_val {
+            let subchain_roots = Self::hash_array_from_bytes(&bytes);
+            for subchain in subchain_roots {
+                let counter = trie.db.get_counter_in_tx(&mut tx, subchain)?;
+                info!(
+                    "Purge slot:{} subchain_root:{}, counter:{}",
+                    slot, subchain, counter
+                );
+                trie.db.decrease(&mut tx, subchain)?;
+                // Return root if it counter was == 1
+                if counter <= 1 {
+                    removed_roots.push(subchain);
+                }
+            }
+        } else {
+            info!("Purge slot:{} without subchain_root data.", slot);
+        };
+
+        tx.delete_cf(slots_cf, Self::subchain_key(slot))?;
         tx.commit()?;
-        Ok(remove_root)
+        Ok(removed_roots)
     }
 
-    pub fn cleanup_slots(&self, keep_slot: u64, root: H256) -> Result<()> {
-        if !self.check_root_exist(root) {
-            return Err(Error::RootNotFound(root));
+    pub fn cleanup_slots(&self, keep_slot: u64, keep_root: H256) -> Result<()> {
+        if !self.check_root_exist(keep_root) {
+            return Err(Error::RootNotFound(keep_root));
         }
 
         let slots_cf = self.cf::<SlotsRoots>();
@@ -606,7 +656,7 @@ impl Storage<OptimisticTransactionDB> {
             if slot == keep_slot {
                 continue;
             }
-            if let Some(root) = self.purge_slot(slot)? {
+            for root in self.purge_slot(slot)? {
                 cleanup_roots.push(root)
             }
         }
@@ -626,30 +676,51 @@ impl Storage<OptimisticTransactionDB> {
     /// 2. When bank change it's root (reset_slot_root flag is provided).
     // Save info. slot -> root_hash
     // Increment root_hash references counter.
-    pub fn register_slot(&self, slot: u64, root: H256, reset_slot_root: bool) -> Result<()> {
+    pub fn register_slot(
+        &self,
+        slot: u64,
+        root: H256,
+        mut subchain_roots: Vec<H256>,
+        reset_slot_root: bool,
+    ) -> Result<()> {
         if !self.gc_enabled {
             return Ok(());
         }
         let slots_cf = self.cf::<SlotsRoots>();
         let trie = self.rocksdb_trie_handle();
 
-        info!("Register slot:{} root:{}", slot, root);
+        info!(
+            "Register slot:{} root:{}, subchains:{:?}",
+            slot, root, subchain_roots
+        );
 
-        const NUM_RETRY: usize = 500; // ~10ms-100ms
         let purge_root = if let Some(data) = self.db().get_cf(slots_cf, slot.to_be_bytes())? {
-            let purge_root = H256::from_slice(data.as_ref());
-            // root should be changed only on purpose, and changed to different value
-            if !reset_slot_root || root == purge_root {
-                error!(
-                    "Slot was already registered, but reset_slot_root wasn't set, slot: {}, previous: {}, new:{}",
-                    slot, purge_root, root
-                );
-                return Ok(());
-            }
-            Some(purge_root)
+            Some(H256::from_slice(data.as_ref()))
         } else {
             None
         };
+
+        let purge_subchains =
+            if let Some(data) = self.db().get_cf(slots_cf, Self::subchain_key(slot))? {
+                Self::hash_array_from_bytes(&data)
+            } else {
+                vec![]
+            };
+
+        subchain_roots.sort();
+
+        let data_exist = purge_root.is_some();
+
+        // root should be changed only on purpose, and changed to different value
+        if data_exist
+            && (!reset_slot_root || (Some(root) == purge_root && subchain_roots == purge_subchains))
+        {
+            error!(
+                "Slot was already registered, but reset_slot_root wasn't set, slot: {}, previous: {:?}({purge_subchains:?}), new:{}{subchain_roots:?}",
+                slot, purge_root, root
+            );
+            return Ok(());
+        }
 
         let retry = || -> Result<_> {
             let mut tx = self.db().transaction();
@@ -658,26 +729,71 @@ impl Storage<OptimisticTransactionDB> {
             tx.commit()?;
             Ok(())
         };
-        let mut complete = None;
+
+        let retry_subchain = || -> Result<_> {
+            let tx = self.db().transaction();
+            tx.put_cf(
+                slots_cf,
+                Self::subchain_key(slot),
+                Self::hash_array_to_bytes(&subchain_roots),
+            )?;
+            // trie.db.increase(&mut tx, root)?; // moved to separate transaction to reduce lock time
+            tx.commit()?;
+            Ok(())
+        };
+
+        // We need to retry transaction in case of conflict in other threads.
+        // We trying to keep them small, to reduce conflict possibility.
+        const NUM_RETRY: usize = 700; // ~20ms-200ms
+        let mut ops: Vec<Box<dyn Fn() -> Result<(), Error>>> = vec![Box::new(retry)];
+        if !subchain_roots.is_empty() {
+            ops.push(Box::new(retry_subchain));
+        }
+        for subchain in &subchain_roots {
+            let trie_subchain = self.rocksdb_trie_handle();
+            ops.push(Box::new(move || -> Result<_> {
+                let mut tx = self.db().transaction();
+                trie_subchain.db.increase(&mut tx, *subchain)?;
+                tx.commit()?;
+                Ok(())
+            }));
+        }
+        ops.reverse();
+
         for retry_count in 0..NUM_RETRY {
-            complete = Some(retry().map(|v| (v, retry_count)));
-            match complete.as_ref().unwrap() {
-                Ok(_) => break,
+            let Some(op) = ops.pop() else {
+                // everything done
+                break;
+            };
+            let result = op();
+            match result {
+                Err(e) if retry_count == NUM_RETRY - 1 => return Err(e),
                 Err(e) => log::trace!(
                     "Error during transaction execution retry_count:{} reason:{}",
                     retry_count + 1,
                     e
                 ),
+                Ok(_) => continue, // this op is done, but maybe we have more
             }
+            ops.push(op); // retry op
         }
-        complete.expect("Retry should save completion artifact.")?;
 
-        if let Some(purge_root) = purge_root {
+        let purge_roots: Vec<_> = purge_root
+            .into_iter()
+            .chain(purge_subchains.into_iter())
+            .collect();
+
+        if !purge_roots.is_empty() {
             let trie = self.rocksdb_trie_handle();
-            if trie.gc_unpin_root(purge_root) {
-                // TODO: Propagate cleanup to outer level.
-                RootCleanup::new(self, vec![purge_root]).cleanup()?;
+            let mut removed_roots = vec![];
+            for root in purge_roots {
+                if trie.gc_unpin_root(root) {
+                    removed_roots.push(root);
+                }
             }
+
+            // TODO: Propagate cleanup to outer level.
+            RootCleanup::new(self, removed_roots).cleanup()?;
         }
         Ok(())
     }
@@ -1185,22 +1301,25 @@ pub mod cleaner {
 pub fn copy_and_purge(
     src: Storage,
     destinations: &[Storage],
-    root: H256,
+    roots: &[H256],
 ) -> Result<(), anyhow::Error> {
-    anyhow::ensure!(src.check_root_exist(root), "Root does not exist");
-
     let source = src.clone();
     let streamer = inspectors::streamer::AccountsStreamer {
         source,
         destinations,
     };
-    let walker = walker::Walker::new_shared(src, streamer);
-    walker.traverse(root)?;
-    // during walking AccountsStreamer increase link to all nodes.
-    // Root should be decreased, because it has no parent for now, and outer caller will increase it's count.
-    for destination in destinations {
-        let trie = destination.rocksdb_trie_handle();
-        trie.db.decrease_atomic(root)?;
+    log::info!("Copy and purge roots: {:?}", roots);
+    let walker = walker::Walker::new_shared(src.clone(), streamer);
+    for root in roots {
+        anyhow::ensure!(src.check_root_exist(*root), "Root does not exist");
+        walker.traverse(*root)?;
+
+        // during walking AccountsStreamer increase link to all nodes.
+        // Root should be decreased, because it has no parent for now, and outer caller will increase it's count.
+        for destination in destinations {
+            let trie = destination.rocksdb_trie_handle();
+            trie.db.decrease_atomic(*root)?;
+        }
     }
     Ok(())
 }

@@ -6,7 +6,7 @@ use {
     },
     crate::{ancestors::AncestorsForSerialization, stakes::StakesCache},
     solana_measure::measure::Measure,
-    solana_program_runtime::evm_executor_context::BlockHashEvm,
+    solana_program_runtime::evm_executor_context::{BlockHashEvm, ChainID},
     std::{cell::RefCell, collections::HashSet, sync::RwLock},
 };
 
@@ -100,6 +100,7 @@ impl From<DeserializableVersionedBank> for BankFieldsToDeserialize {
             is_delta: dvb.is_delta,
             evm_chain_id: dvb.evm_chain_id,
             evm_persist_fields: dvb.evm_persist_fields,
+            evm_side_chains: HashMap::new(), // apply later
         }
     }
 }
@@ -205,6 +206,7 @@ impl<'a> TypeContext<'a> for Context {
         let ancestors = HashMap::from(&serializable_bank.bank.ancestors);
         let fields = serializable_bank.bank.get_fields_to_serialize(&ancestors);
         let lamports_per_signature = fields.fee_rate_governor.lamports_per_signature;
+        let side_chains = fields.evm_side_chains.clone();
         (
             SerializableVersionedBank::from(fields),
             SerializableAccountsDb::<'a, Self> {
@@ -216,6 +218,7 @@ impl<'a> TypeContext<'a> for Context {
             // Field that isn't part SerializableVersionedBank, but that we want to
             // be able to store / read back on restart
             lamports_per_signature,
+            side_chains,
         )
             .serialize(serializer)
     }
@@ -313,11 +316,20 @@ impl<'a> TypeContext<'a> for Context {
             deserialize_from::<_, DeserializableVersionedBank>(&mut stream)?.into();
         let accounts_db_fields = Self::deserialize_accounts_db_fields(stream)?;
         // Process extra fields
-        let lamports_per_signature: u64 = match deserialize_from(stream) {
+        let lamports_per_signature: u64 = match deserialize_from(&mut stream) {
             Err(err) if err.to_string() == "io error: unexpected end of file" => Ok(0),
             Err(err) if err.to_string() == "io error: failed to fill whole buffer" => Ok(0),
             result => result,
         }?;
+
+        bank_fields.evm_side_chains = match deserialize_from(stream) {
+            Err(err) if err.to_string() == "io error: unexpected end of file" => Ok(HashMap::new()),
+            Err(err) if err.to_string() == "io error: failed to fill whole buffer" => {
+                Ok(HashMap::new())
+            }
+            result => result,
+        }?;
+
         bank_fields.fee_rate_governor = bank_fields
             .fee_rate_governor
             .clone_with_lamports_per_signature(lamports_per_signature);

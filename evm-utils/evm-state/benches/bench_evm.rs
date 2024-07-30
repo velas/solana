@@ -350,10 +350,10 @@ fn criterion_benchmark(c: &mut Criterion) {
 
                 if slot != 0 {
                     // skip gc at first slot
-                    let removed_root = block.kvs().purge_slot(slot).unwrap().unwrap();
-                    assert_eq!(removed_root, root_before);
+                    let removed_roots = block.kvs().purge_slot(slot).unwrap();
+                    assert_eq!(removed_roots[0], root_before);
 
-                    let (mut direct, mut indirect) = (vec![removed_root], vec![]);
+                    let (mut direct, mut indirect) = (removed_roots, vec![]);
                     while !direct.is_empty() {
                         let childs = block.kvs().gc_try_cleanup_account_hashes(&direct);
 
@@ -370,7 +370,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
                 block
                     .kvs()
-                    .register_slot(slot, block.last_root(), false)
+                    .register_slot(slot, block.last_root(), vec![], false)
                     .unwrap();
                 updated_state = block;
 
@@ -451,7 +451,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
                 block
                     .kvs()
-                    .register_slot(slot, block.last_root(), false)
+                    .register_slot(slot, block.last_root(), vec![], false)
                     .unwrap();
                 updated_state = block;
 
