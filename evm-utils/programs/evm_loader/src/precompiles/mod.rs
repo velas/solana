@@ -104,7 +104,8 @@ pub fn simulation_entrypoint<'a>(
     users_accounts: &'a [KeyedAccount],
 ) -> OwnedPrecompile<'a> {
     let accounts = AccountStructure::new(evm_account, users_accounts);
-    entrypoint(accounts, activate_precompile, true)
+    let is_subchain = false;
+    entrypoint(accounts, activate_precompile, true, is_subchain)
 }
 
 #[derive(Debug, PartialEq)]
@@ -114,10 +115,22 @@ pub enum PrecompileSet {
     VelasNext,
 }
 
+// TODO: do type alias
+type Precompile = Box<
+    dyn for<'a, 'b> Fn(
+        &'a [u8],
+        Option<u64>,
+        Option<CallScheme>,
+        &'b Context,
+        bool,
+    ) -> Result<(PrecompileOutput, u64, LogEntry), PrecompileFailure>,
+>;
+
 pub fn entrypoint(
     accounts: AccountStructure,
     activate_precompile: PrecompileSet,
     keep_old_errors: bool,
+    is_subchain: bool,
 ) -> OwnedPrecompile {
     let mut map = BTreeMap::new();
 
@@ -160,39 +173,46 @@ pub fn entrypoint(
         )
     }));
 
-    map.extend(NATIVE_CONTRACTS.iter().map(|(k, (method, _))| {
-        (
-            *k,
-            Box::new(
-                move |function_abi_input: &[u8],
-                      gas_left,
-                      call_scheme,
-                      cx: &Context,
-                      _is_static| {
-                    let cx =
-                        NativeContext::new(keep_old_errors, accounts, gas_left, cx, call_scheme);
-                    method(function_abi_input, cx).map_err(|err| {
-                        let exit_err: ExitError = Into::into(err);
-                        PrecompileFailure::Error {
-                            exit_status: exit_err,
-                        }
-                    })
-                },
-            )
-                as Box<
-                    dyn for<'a, 'b> Fn(
-                        &[u8],
-                        Option<u64>,
-                        Option<CallScheme>,
-                        &Context,
-                        bool,
-                    ) -> Result<
-                        (PrecompileOutput, u64, LogEntry),
-                        PrecompileFailure,
+    if !is_subchain {
+        map.extend(NATIVE_CONTRACTS.iter().map(|(k, (method, _))| {
+            (
+                *k,
+                Box::new(
+                    move |function_abi_input: &[u8],
+                          gas_left,
+                          call_scheme,
+                          cx: &Context,
+                          _is_static| {
+                        let cx = NativeContext::new(
+                            keep_old_errors,
+                            accounts,
+                            gas_left,
+                            cx,
+                            call_scheme,
+                        );
+                        method(function_abi_input, cx).map_err(|err| {
+                            let exit_err: ExitError = Into::into(err);
+                            PrecompileFailure::Error {
+                                exit_status: exit_err,
+                            }
+                        })
+                    },
+                )
+                    as Box<
+                        dyn for<'a, 'b> Fn(
+                            &[u8],
+                            Option<u64>,
+                            Option<CallScheme>,
+                            &Context,
+                            bool,
+                        ) -> Result<
+                            (PrecompileOutput, u64, LogEntry),
+                            PrecompileFailure,
+                        >,
                     >,
-                >,
-        )
-    }));
+            )
+        }));
+    }
     OwnedPrecompile { precompiles: map }
 }
 

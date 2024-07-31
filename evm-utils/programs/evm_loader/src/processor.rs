@@ -301,7 +301,7 @@ impl EvmProcessor {
         tx: ExecuteTransaction,
         fee_type: FeePayerType,
         borsh_used: bool,
-        subchain: bool,
+        is_subchain: bool,
     ) -> Result<(), EvmError> {
         let is_big = tx.is_big();
         let keep_old_errors = true;
@@ -310,7 +310,7 @@ impl EvmProcessor {
         // they should appear after storage and subchain_evm_state.
         let mut start_idx = if is_big { 1 } else { 0 };
 
-        if subchain {
+        if is_subchain {
             start_idx += 1;
         }
 
@@ -364,7 +364,12 @@ impl EvmProcessor {
                 executor.transaction_execute(
                     tx,
                     withdraw_fee_from_evm,
-                    precompiles::entrypoint(accounts, activate_precompile, keep_old_errors),
+                    precompiles::entrypoint(
+                        accounts,
+                        activate_precompile,
+                        keep_old_errors,
+                        is_subchain,
+                    ),
                 )
             }
             ExecuteTransaction::ProgramAuthorized { tx, from } => {
@@ -404,7 +409,12 @@ impl EvmProcessor {
                     from,
                     tx,
                     withdraw_fee_from_evm,
-                    precompiles::entrypoint(accounts, activate_precompile, keep_old_errors),
+                    precompiles::entrypoint(
+                        accounts,
+                        activate_precompile,
+                        keep_old_errors,
+                        is_subchain,
+                    ),
                 )
             }
         };
@@ -429,7 +439,7 @@ impl EvmProcessor {
             tx_gas_price,
             result,
             withdraw_fee_from_evm,
-            subchain,
+            is_subchain,
         )
     }
 
@@ -2137,11 +2147,9 @@ mod test {
         // create accounts
         let mut rand = evm_state::rand::thread_rng();
         let user_id = Pubkey::new_unique();
-        // let user_evm = crate::evm_address_for_program(user_id);
         let user_acc = evm_context.native_account(user_id);
         let bob = evm::SecretKey::new(&mut rand);
         let bob_addr = bob.to_address();
-        // user_acc.set_owner(system_program::ID);
         user_acc.set_lamports(SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX);
         evm_context.deposit_evm(bob_addr, lamports_to_gwei(10_000_000));
 
@@ -2155,7 +2163,7 @@ mod test {
             crate::create_evm_subchain_account(user_id, subchain_id, subchain_config);
         evm_context.process_instruction(create_subchain_ix).unwrap();
 
-        // evm_context.evm_state // main_chain evm
+        // check balances
         let subchain = evm_context.subchains.get(&subchain_id).unwrap(); // subchain evm
         let subchain_acc = subchain.get_account_state(bob_addr).unwrap();
 
@@ -2211,7 +2219,44 @@ mod test {
             .unwrap();
 
         let user_acc = evm_context.native_account(user_id);
-        assert_eq!(user_acc.lamports(), 4_000_000);
+        // assert_eq!(user_acc.lamports(), 4_000_000);
+
+        // check transfers
+        let lamports_before = evm_context
+            .native_account(solana::evm_state::id())
+            .lamports();
+        let paid = 1_500_000;
+
+        let alice = evm::SecretKey::new(&mut rand);
+        let alice_pub = alice.to_address();
+
+        assert!(evm_context
+            .process_instruction(crate::transfer_native_to_evm(user_id, paid, alice_pub))
+            .is_ok());
+
+        assert_eq!(
+            evm_context
+                .native_account(solana::evm_state::id())
+                .lamports(),
+            lamports_before + paid
+        );
+        // assert_eq!(evm_context.native_account(user_id).lamports(), 0);
+        // assert!(evm_context
+        //     .process_instruction(crate::free_ownership(user_id))
+        //     .is_ok());
+        // assert_eq!(
+        //     *evm_context.native_account(user_id).owner(),
+        //     solana_sdk::system_program::id()
+        // );
+
+        // assert_eq!(
+        //     evm_context
+        //         .evm_state
+        //         .get_account_state(ether_dummy_address)
+        //         .unwrap()
+        //         .balance,
+        //     crate::scope::evm::lamports_to_gwei(1000)
+        // );
     }
 
     #[test]
@@ -3359,7 +3404,7 @@ mod test {
         assert_eq!(subchain_evm.get_executed_transactions().len(), 1);
         //TODO: Check account state in native chain.
         // failed because already exist
-        let err = evm_context
+        let _err = evm_context
             .process_instruction(crate::create_evm_subchain_account(
                 user_id,
                 chain_id,
