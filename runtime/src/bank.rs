@@ -36,6 +36,7 @@
 pub use evm::VelasEVM;
 use evm_state::EvmState;
 use solana_evm_loader_program::processor::EvmProcessor;
+use solana_program_runtime::evm_executor_context::StateExt;
 use solana_program_runtime::evm_executor_context::{
     BlockHashEvm, ChainID, EvmBank, EvmExecutorContext,
 };
@@ -2208,8 +2209,8 @@ impl Bank {
             evm_side_chains: self
                 .evm
                 .side_chains()
-                .into_iter()
-                .map(|(k, v)| (*k, v.state().clone().save_state()))
+                .iter()
+                .map(|s| (*s.key(), s.value().state().clone().save_state()))
                 .collect(),
             ancestors,
             hash: *self.hash.read().unwrap(),
@@ -4779,15 +4780,21 @@ impl Bank {
             let chain_name = chain
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "main".to_string());
-            let mut evm_state = if chain.is_none() {
-                self.evm.main_chain().state_write()
-            } else {
-                self.evm.chain_state(chain.unwrap()).state_write()
-            };
 
-            trace!("Updating evm {chain_name} state, before = {:?}", *evm_state);
-            trace!("Updating evm {chain_name} state, after = {:?}", patch);
-            *evm_state = patch.into()
+            trace!(
+                "Updating evm {chain_name} state, applying new_state = {:?}",
+                patch
+            );
+            if chain.is_none() {
+                let mut evm_state = self.evm.main_chain().state_write();
+                trace!("Updating evm {chain_name} state, before = {:?}", *evm_state);
+                *evm_state = patch.into()
+            } else {
+                // different lock types
+                let mut evm_state = self.evm.chain_state_write(chain.unwrap()).state();
+                trace!("Updating evm {chain_name} state, before = {:?}", *evm_state);
+                *evm_state = patch.into()
+            };
         }
 
         // once committed there is no way to unroll

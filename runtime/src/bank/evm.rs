@@ -79,12 +79,27 @@ impl Bank {
         let mut measure = Measure::start("commit-evm-block-ms");
 
         let old_root = self.evm().main_chain().state().last_root();
+
+        let last_blockhash = self.last_blockhash().to_bytes();
         let hash = self
             .evm
             .main_chain()
             .state_write()
-            .try_commit(self.slot(), self.last_blockhash().to_bytes())
+            .try_commit(self.slot(), last_blockhash)
             .expect("failed to commit evm");
+
+        // TODO: cleanup default?
+        for mut chain in self.evm.side_chains().iter_mut() {
+            let subchain_old_root = chain.evm_state.last_root();
+            let Some((new_root, changes)) = chain.value_mut()
+                .evm_state
+                .try_commit(self.slot(), last_blockhash)
+                .expect("failed to commit evm") else {
+                    // nothing to do
+                    continue;
+                };
+            chain.evm_changed_list = Some((old_root, changes));
+        }
 
         measure.stop();
         debug!("EVM state commit took {}", measure);
@@ -218,9 +233,12 @@ impl VelasEVM {
 mod evmtests {
 
     use crate::bank::Bank;
+    use solana_evm_loader_program::scope::evm::lamports_to_gwei;
+    use solana_program_runtime::evm_executor_context::StateExt;
+    use solana_sdk::native_token::LAMPORTS_PER_VLX;
     pub use solana_sdk::reward_type::RewardType;
 
-    use evm_state::{AccountProvider, TEST_CHAIN_ID};
+    use evm_state::{AccountProvider, EvmState, TEST_CHAIN_ID};
     use {
         evm_state::FromKey,
         log::*,
@@ -902,32 +920,30 @@ mod evmtests {
         std::panic::catch_unwind(|| evm_state.get_account_state(sender_addr)).unwrap_err();
     }
 
+    fn create_subchain_with_preseed(
+        from_keypair: &Keypair,
+        receiver: evm_state::H160,
+        chain_id: u64,
+        hash: Hash,
+        lamports: u64,
+    ) -> Transaction {
+        let mut config: solana_evm_loader_program::instructions::SubchainConfig =
+            Default::default();
+        config.mint.push((receiver, lamports.into()));
+        let from_pubkey = from_keypair.pubkey();
+        let instruction =
+            solana_evm_loader_program::create_evm_subchain_account(from_pubkey, chain_id, config);
+        let message = Message::new(&[instruction], Some(&from_pubkey));
+        Transaction::new(&[from_keypair], message, hash)
+    }
+
     #[test]
-    fn create_evm_subchain() {
+    fn create_evm_subchain_no_deposit() {
         solana_logger::setup_with("trace");
-        fn create_subchain_with_preseed(
-            from_keypair: &Keypair,
-            receiver: evm_state::H160,
-            chain_id: u64,
-            hash: Hash,
-            lamports: u64,
-        ) -> Transaction {
-            let mut config: solana_evm_loader_program::instructions::SubchainConfig =
-                Default::default();
-            config.mint.push((receiver, lamports.into()));
-            let from_pubkey = from_keypair.pubkey();
-            let instruction = solana_evm_loader_program::create_evm_subchain_account(
-                from_pubkey,
-                chain_id,
-                config,
-            );
-            let s = Keypair::new();
-            let message = Message::new(&[instruction], Some(&from_pubkey));
-            Transaction::new(&[from_keypair, &s], message, hash)
-        }
+
         let tx = solana_evm_loader_program::processor::dummy_call(0).0;
         let receiver = tx.caller().unwrap();
-        let (genesis_config, mint_keypair) = create_genesis_config(20000);
+        let (genesis_config, mint_keypair) = create_genesis_config(20000); // no enough tokens for deposit
         let mut bank = Bank::new_for_tests(&genesis_config);
 
         bank.activate_feature(&feature_set::velas::native_swap_in_evm_history::id());
@@ -944,9 +960,8 @@ mod evmtests {
         );
         let res = bank.process_transaction(&tx);
 
-        res.unwrap_err();
+        let _err = res.unwrap_err();
 
-        let hash_before = bank.evm.main_chain().state().last_root();
         bank.freeze();
 
         let evm_state = bank.evm.main_chain().state();
@@ -956,13 +971,67 @@ mod evmtests {
 
         let subchain_evm_state = bank.evm.chain_state(TEST_CHAIN_ID + 1).state();
 
-        assert_eq!(subchain_evm_state.processed_tx_len(), 1);
+        // no deposit no tx
+        assert_eq!(subchain_evm_state.processed_tx_len(), 0);
         let account = bank.get_account(&mint_keypair.pubkey()).unwrap();
-        assert_eq!(account.lamports(), 0);
+        assert_eq!(account.lamports(), 20000);
         let state = subchain_evm_state
             .get_account_state(receiver)
             .unwrap_or_default();
-        assert_eq!(state.balance, 20000.into());
+        assert_eq!(state.balance, 0.into());
+
+        todo!()
+        // hash updated with nonce increasing
+        // assert_ne!(hash_before, hash_after);
+    }
+
+    #[test]
+    fn create_evm_subchain_regular() {
+        solana_logger::setup_with("trace");
+        let tx = solana_evm_loader_program::processor::dummy_call(0).0;
+        let receiver = tx.caller().unwrap();
+        let (genesis_config, mint_keypair) = create_genesis_config(LAMPORTS_PER_VLX * 1_000_000);
+        let mut bank = Bank::new_for_tests(&genesis_config);
+
+        bank.activate_feature(&feature_set::velas::native_swap_in_evm_history::id());
+        bank.activate_feature(&feature_set::velas::evm_new_error_handling::id());
+        bank.activate_feature(&feature_set::velas::evm_instruction_borsh_serialization::id());
+        let recent_hash = genesis_config.hash();
+
+        let tx = create_subchain_with_preseed(
+            &mint_keypair,
+            receiver,
+            TEST_CHAIN_ID + 1,
+            recent_hash,
+            20000,
+        );
+        let res = bank.process_transaction(&tx).unwrap();
+
+        let hash_before = bank.evm.main_chain().state().last_root();
+
+        let state = match *bank.evm.chain_state(TEST_CHAIN_ID + 1).state() {
+            EvmState::Incomming(ref i) => i.get_account_state(receiver).unwrap_or_default(),
+            EvmState::Committed(_) => panic!(),
+        };
+
+        assert_eq!(state.balance, lamports_to_gwei(20000));
+        bank.freeze();
+
+        let evm_state = bank.evm.main_chain().state();
+
+        // check that revert keep tx in history, but balances are set to zero
+        assert_eq!(evm_state.processed_tx_len(), 0);
+
+        let subchain_evm_state = bank.evm.chain_state(TEST_CHAIN_ID + 1).state();
+        log::debug!("subchain_evm_state: {:?}", *subchain_evm_state);
+        assert_eq!(subchain_evm_state.processed_tx_len(), 1);
+        let account = bank.get_account(&mint_keypair.pubkey()).unwrap_or_default();
+        assert_eq!(account.lamports(), 0);
+
+        let state = subchain_evm_state
+            .get_account_state(receiver)
+            .unwrap_or_default();
+        assert_eq!(state.balance, lamports_to_gwei(20000));
 
         todo!()
         // hash updated with nonce increasing

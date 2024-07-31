@@ -1,5 +1,9 @@
 use std::{cell::RefCell, fmt, marker::PhantomData, ops::Deref, rc::Rc};
 
+use dashmap::{
+    mapref::one::{MappedRef, MappedRefMut, Ref, RefMut},
+    DashMap,
+};
 use serde::{
     de::{SeqAccess, Visitor},
     ser::SerializeTuple as _,
@@ -102,15 +106,29 @@ pub type ChangedList = Option<(evm_state::H256, evm_state::ChangedState)>;
 
 #[derive(Debug, Default)]
 pub struct EvmChain {
-    pub evm_state: RwLock<evm_state::EvmState>,
-    pub evm_changed_list: RwLock<ChangedList>,
+    pub evm_state: evm_state::EvmState,
+    pub evm_changed_list: ChangedList,
 }
 
+impl EvmChain {
+    pub fn from_main_chain(main: &MainChain) -> Self {
+        let evm_state = evm_state::EvmBackend {
+            kvs: main.evm_state.read().unwrap().kvs().clone(),
+            state: evm_state::Incomming::genesis_from_state(evm_state::empty_trie_hash()),
+        };
+
+        Self {
+            evm_state: evm_state.into(),
+            evm_changed_list: None,
+        }
+    }
+}
+//TODO: do we need clone?
 impl Clone for EvmChain {
     fn clone(&self) -> Self {
         Self {
-            evm_state: RwLock::new(self.evm_state.read().unwrap().clone()),
-            evm_changed_list: RwLock::new(self.evm_changed_list.read().unwrap().clone()),
+            evm_state: self.evm_state.clone(),
+            evm_changed_list: self.evm_changed_list.clone(),
         }
     }
 }
@@ -118,7 +136,8 @@ impl Clone for EvmChain {
 #[derive(Debug, Default)]
 pub struct MainChain {
     pub chain_id: ChainID,
-    pub chain: EvmChain,
+    pub evm_state: RwLock<evm_state::EvmState>,
+    pub evm_changed_list: RwLock<ChangedList>,
     pub evm_blockhashes: RwLock<BlockHashEvm>,
 }
 
@@ -126,7 +145,8 @@ impl Clone for MainChain {
     fn clone(&self) -> Self {
         Self {
             chain_id: self.chain_id.clone(),
-            chain: self.chain.clone(),
+            evm_state: RwLock::new(self.evm_state.read().unwrap().clone()),
+            evm_changed_list: RwLock::new(self.evm_changed_list.read().unwrap().clone()),
             evm_blockhashes: RwLock::new(self.evm_blockhashes.read().unwrap().clone()),
         }
     }
@@ -163,29 +183,6 @@ impl MainChain {
 
     /// EVM State Read-Only Lock Guard
     pub fn state<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, evm_state::EvmState> {
-        self.chain.state()
-    }
-
-    /// EVM State Write Lock Guard
-    pub fn state_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, evm_state::EvmState> {
-        self.chain.state_write()
-    }
-
-    /// EVM Blockhashes Read-Only Lock Guard
-    pub fn changed_list<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, ChangedList> {
-        self.chain.changed_list()
-    }
-
-    // TODO: do not expose WriteGuard, do setter
-    /// EVM Blockhashes Write Lock Guard
-    pub fn changed_list_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, ChangedList> {
-        self.chain.changed_list_write()
-    }
-}
-
-impl EvmChain {
-    /// EVM State Read-Only Lock Guard
-    pub fn state<'a>(&'a self) -> std::sync::RwLockReadGuard<'a, evm_state::EvmState> {
         self.evm_state
             .read()
             .expect("EVM State RwLock was poisoned")
@@ -214,10 +211,10 @@ impl EvmChain {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct EvmBank {
     pub(crate) main_chain: MainChain,
-    pub(crate) side_chains: HashMap<ChainID, EvmChain>,
+    pub(crate) side_chains: DashMap<ChainID, EvmChain>,
 }
 
 impl EvmBank {
@@ -231,10 +228,8 @@ impl EvmBank {
             main_chain: MainChain {
                 chain_id: evm_chain_id,
                 evm_blockhashes: RwLock::new(evm_blockhashes),
-                chain: EvmChain {
-                    evm_state: RwLock::new(evm_state),
-                    evm_changed_list: RwLock::new(None),
-                },
+                evm_state: RwLock::new(evm_state),
+                evm_changed_list: RwLock::new(None),
             },
             side_chains: side_chains
                 .into_iter()
@@ -242,8 +237,8 @@ impl EvmBank {
                     (
                         k,
                         EvmChain {
-                            evm_state: RwLock::new(v),
-                            evm_changed_list: RwLock::new(None),
+                            evm_state: v,
+                            evm_changed_list: None,
                         },
                     )
                 })
@@ -254,16 +249,14 @@ impl EvmBank {
         evm_chain_id: ChainID,
         evm_blockhashes: BlockHashEvm,
         evm_state: evm_state::EvmState,
-        side_chains: HashMap<ChainID, EvmChain>,
+        side_chains: DashMap<ChainID, EvmChain>,
     ) -> Self {
         Self {
             main_chain: MainChain {
                 chain_id: evm_chain_id,
                 evm_blockhashes: RwLock::new(evm_blockhashes),
-                chain: EvmChain {
-                    evm_state: RwLock::new(evm_state),
-                    evm_changed_list: RwLock::new(None),
-                },
+                evm_state: RwLock::new(evm_state),
+                evm_changed_list: RwLock::new(None),
             },
             side_chains,
         }
@@ -277,25 +270,47 @@ impl EvmBank {
         &self.main_chain
     }
 
-    pub fn side_chains(&self) -> &HashMap<ChainID, EvmChain> {
+    pub fn side_chains(&self) -> &DashMap<ChainID, EvmChain> {
         &self.side_chains
     }
 
     pub fn subchain_roots(&self) -> Vec<evm_state::H256> {
         self.side_chains
-            .values()
-            .map(|c| c.state().last_root())
+            .iter()
+            .map(|c| c.evm_state.last_root())
             .collect()
     }
 
-    pub fn chain_state(&self, chain_id: ChainID) -> &EvmChain {
+    pub fn chain_state(&self, chain_id: ChainID) -> Ref<u64, EvmChain> {
         if chain_id == self.main_chain.id() {
             panic!("Main chain state should be accessed via main_chain() method");
         }
+        if let Some(c) = self.side_chains.get(&chain_id) {
+            return c;
+        }
+        self.side_chains
+            .insert(chain_id, EvmChain::from_main_chain(&self.main_chain));
+
         self.side_chains
             .get(&chain_id)
-            .expect("Chain does not exist")
+            .expect("Chain should be inserted")
     }
+
+    pub fn chain_state_write(&self, chain_id: ChainID) -> RefMut<u64, EvmChain> {
+        if chain_id == self.main_chain.id() {
+            panic!("Main chain state should be accessed via main_chain() method");
+        }
+        if let Some(c) = self.side_chains.get_mut(&chain_id) {
+            return c;
+        }
+        self.side_chains
+            .insert(chain_id, EvmChain::from_main_chain(&self.main_chain));
+
+        self.side_chains
+            .get_mut(&chain_id)
+            .expect("Chain should be inserted")
+    }
+
     pub fn main_chain_mut(&mut self) -> &mut MainChain {
         &mut self.main_chain
     }
@@ -303,15 +318,36 @@ impl EvmBank {
 
 impl PartialEq for EvmChain {
     fn eq(&self, other: &Self) -> bool {
-        let last_root_self = self.state().last_root();
-        let last_root_other = other.state().last_root();
+        let last_root_self = self.evm_state.last_root();
+        let last_root_other = other.evm_state.last_root();
 
         last_root_self == last_root_other
     }
 }
 impl PartialEq for MainChain {
     fn eq(&self, other: &Self) -> bool {
-        self.chain_id == other.chain_id && self.chain == other.chain
+        self.chain_id == other.chain_id && self.state().last_root() == other.state().last_root()
+    }
+}
+impl PartialEq for EvmBank {
+    fn eq(&self, other: &Self) -> bool {
+        if self.main_chain != other.main_chain || self.side_chains.len() != other.side_chains.len()
+        {
+            return false;
+        }
+        for side in self.side_chains.iter() {
+            let chain_id = side.key();
+            let root = side.value().evm_state.last_root();
+            if !other
+                .side_chains
+                .get(chain_id)
+                .map(|other_chain| root == other_chain.evm_state.last_root())
+                .unwrap_or_default()
+            {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -498,7 +534,7 @@ impl EvmExecutorContext {
 
     fn get_evm_state_from_lock(
         &self,
-        state: std::sync::RwLockReadGuard<'_, evm_state::EvmState>,
+        state: impl Deref<Target = evm_state::EvmState>,
     ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
         let lock = match self.context_type {
             EvmExecutorContextType::Execution => self.take_evm_state_cloned(state),
@@ -523,7 +559,7 @@ impl EvmExecutorContext {
                     .evm
                     .side_chains
                     .get(chain_id)
-                    .map(|c| c.state())
+                    .map(|c| c.map(|s| &s.evm_state))
                     .and_then(|s| self.get_evm_state_from_lock(s));
                 if subchain_state.is_none() {
                     warn!("Can't create new executor, for non-initialized subchain.");
@@ -537,7 +573,7 @@ impl EvmExecutorContext {
                     .evm
                     .side_chains
                     .get(chain_id)
-                    .map(|c| c.state())
+                    .map(|c| c.map(|s| &s.evm_state))
                     .and_then(|s| self.get_evm_state_from_lock(s));
 
                 if subchain_state.is_some() {
@@ -577,10 +613,12 @@ impl EvmExecutorContext {
 
     pub fn cleanup(&mut self, strategy: PatchStrategy) {
         let (chain_id, executor): (_, Executor) = {
-            let (chain_id, executor) = self
+            let Some((chain_id, executor)) = self
                 .active_executor
-                .take()
-                .expect("Executor was not created, nothing to deconstruct");
+                .take() else {
+                    log::error!("Executor was not created, on cleanup.");
+                    return;
+                };
             (
                 chain_id,
                 Rc::try_unwrap(executor)
@@ -599,7 +637,7 @@ impl EvmExecutorContext {
         let after = new_patch.last_root();
 
         log::trace!(
-            "Updating EVM state, hash_before = {:?}, after = {:?}",
+            "Updating EVM patches, hash_before = {:?}, after = {:?}",
             before,
             after
         );
@@ -621,7 +659,7 @@ impl EvmExecutorContext {
 
     fn take_evm_state_cloned(
         &self,
-        state: std::sync::RwLockReadGuard<'_, evm_state::EvmState>,
+        state: impl Deref<Target = evm_state::EvmState>,
     ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
         match &*state {
             evm_state::EvmState::Incomming(i) => Some(i.clone()),
@@ -639,9 +677,9 @@ impl EvmExecutorContext {
 
     fn take_evm_state_for_simulation(
         &self,
-        state: std::sync::RwLockReadGuard<'_, evm_state::EvmState>,
+        state: impl Deref<Target = evm_state::EvmState>,
     ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
-        match &*state {
+        match state.deref() {
             evm_state::EvmState::Incomming(i) => Some(i.clone()),
             evm_state::EvmState::Committed(c) => {
                 debug!(
@@ -654,6 +692,39 @@ impl EvmExecutorContext {
     }
 }
 
+pub trait StateExt<'a> {
+    type MapRef<'b, T: 'b + 'a>
+    where
+        'a: 'b;
+    fn state(self) -> Self::MapRef<'a, evm_state::EvmState>;
+}
+impl<'a, K: Eq + std::hash::Hash + 'a> StateExt<'a> for Ref<'a, K, EvmChain> {
+    type MapRef<'b, T: 'b + 'a> = MappedRef<'b, K, EvmChain, T>
+    where
+        'a: 'b;
+    fn state(self) -> Self::MapRef<'a, evm_state::EvmState> {
+        self.map(|c| &c.evm_state)
+    }
+}
+
+impl<'a, K: Eq + std::hash::Hash + 'a> StateExt<'a> for RefMut<'a, K, EvmChain> {
+    type MapRef<'b, T: 'b + 'a> = MappedRefMut<'b, K, EvmChain, T>
+    where
+        'a: 'b;
+    fn state(self) -> Self::MapRef<'a, evm_state::EvmState> {
+        self.map(|c| &mut c.evm_state)
+    }
+}
+
+impl<'a> StateExt<'a> for &'a EvmChain {
+    type MapRef<'b, T: 'b + 'a> = &'b T
+    where
+        'a: 'b;
+
+    fn state(self) -> Self::MapRef<'a, evm_state::EvmState> {
+        &self.evm_state
+    }
+}
 #[cfg(test)]
 mod tests {
     use evm_state::H256;
