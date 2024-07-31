@@ -206,7 +206,7 @@ pub enum Hardfork {
 )]
 pub struct SubchainConfig {
     pub hardfork: Hardfork,
-    pub mint: Vec<(Address, u64)>,
+    pub mint: Vec<(Address, u64)>, // lamports
 }
 impl Default for SubchainConfig {
     fn default() -> Self {

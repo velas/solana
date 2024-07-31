@@ -1070,7 +1070,7 @@ mod test {
     use evm_state::{
         empty_trie_hash,
         transactions::{TransactionAction, TransactionSignature},
-        AccountState, EvmBackend, FromKey, Incomming,
+        AccountState, EvmBackend, FromKey, Incomming, BURN_GAS_PRICE,
     };
     use evm_state::{AccountProvider, ExitReason, ExitSucceed};
     use hex_literal::hex;
@@ -1104,6 +1104,7 @@ mod test {
     use std::{
         cell::RefCell,
         collections::{BTreeMap, BTreeSet},
+        f32::consts::E,
         sync::RwLock,
     };
     use std::{collections::HashMap, rc::Rc};
@@ -1172,13 +1173,13 @@ mod test {
             self.process_transaction(vec![ix])
         }
 
-        fn deposit_evm(&mut self, evm_addr: evm_state::Address, amount: evm_state::U256) {
+        fn deposit_evm(&mut self, recipient: evm_state::Address, gweis: evm_state::U256) {
             let mut account_state = self
                 .evm_state
-                .get_account_state(evm_addr)
+                .get_account_state(recipient)
                 .unwrap_or_default();
-            account_state.balance += amount;
-            self.evm_state.set_account_state(evm_addr, account_state)
+            account_state.balance += gweis;
+            self.evm_state.set_account_state(recipient, account_state)
         }
 
         // Used only for create_and_assign_account
@@ -2125,6 +2126,92 @@ mod test {
                 .balance,
             crate::scope::evm::lamports_to_gwei(lamports_to_send)
         );
+    }
+
+    #[test]
+    fn swap_evm_to_vlx_within_different_chains() {
+        // prepare context
+        let mut evm_context = EvmMockContext::new(10_000_000);
+        // TODO: feature activation
+
+        // create accounts
+        let mut rand = evm_state::rand::thread_rng();
+        let user_id = Pubkey::new_unique();
+        // let user_evm = crate::evm_address_for_program(user_id);
+        let user_acc = evm_context.native_account(user_id);
+        let bob = evm::SecretKey::new(&mut rand);
+        let bob_addr = bob.to_address();
+        // user_acc.set_owner(system_program::ID);
+        user_acc.set_lamports(SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX);
+        evm_context.deposit_evm(bob_addr, lamports_to_gwei(10_000_000));
+
+        // create subchain
+        let subchain_id = 51777;
+        let subchain_config = SubchainConfig {
+            hardfork: crate::instructions::Hardfork::Istanbul,
+            mint: vec![(bob_addr, 20_000_000_000u64)],
+        };
+        let create_subchain_ix =
+            crate::create_evm_subchain_account(user_id, subchain_id, subchain_config);
+        evm_context.process_instruction(create_subchain_ix).unwrap();
+
+        // evm_context.evm_state // main_chain evm
+        let subchain = evm_context.subchains.get(&subchain_id).unwrap(); // subchain evm
+        let subchain_acc = subchain.get_account_state(bob_addr).unwrap();
+
+        let main_acc = evm_context.evm_state.get_account_state(bob_addr).unwrap();
+        assert_eq!(subchain_acc.balance, lamports_to_gwei(20_000_000_000));
+        assert_eq!(main_acc.balance, lamports_to_gwei(10_000_000));
+
+        // try to swap from EVM mainchain and assert successful swap
+        let swap_within_mainchain = evm::UnsignedTransaction {
+            nonce: 0u32.into(),
+            gas_price: BURN_GAS_PRICE.into(),
+            gas_limit: 300_000u32.into(),
+            action: TransactionAction::Call(*precompiles::ETH_TO_VLX_ADDR),
+            value: crate::scope::evm::lamports_to_gwei(4_000_000),
+            input: precompiles::ETH_TO_VLX_CODE
+                .abi
+                .encode_input(&[ethabi::Token::FixedBytes(user_id.to_bytes().to_vec())])
+                .unwrap(),
+        }
+        .sign(&bob, Some(TEST_CHAIN_ID));
+        evm_context
+            .process_instruction(crate::send_raw_tx(
+                user_id,
+                swap_within_mainchain,
+                None,
+                FeePayerType::Evm,
+            ))
+            .unwrap();
+
+        let user_acc = evm_context.native_account(user_id);
+        assert_eq!(user_acc.lamports(), 4_000_000);
+
+        // try to swap from EVM mainchain and assert successful swap
+        let swap_within_subchain = evm::UnsignedTransaction {
+            nonce: 0u32.into(),
+            gas_price: BURN_GAS_PRICE.into(),
+            gas_limit: 300000u32.into(),
+            action: TransactionAction::Call(*precompiles::ETH_TO_VLX_ADDR),
+            value: crate::scope::evm::lamports_to_gwei(4_000_000),
+            input: precompiles::ETH_TO_VLX_CODE
+                .abi
+                .encode_input(&[ethabi::Token::FixedBytes(user_id.to_bytes().to_vec())])
+                .unwrap(),
+        }
+        .sign(&bob, Some(subchain_id));
+        evm_context
+            .process_instruction(crate::send_raw_tx_subchain(
+                user_id,
+                swap_within_subchain,
+                None,
+                subchain_id,
+            ))
+            .unwrap();
+
+        let user_acc = evm_context.native_account(user_id);
+        assert_eq!(user_acc.lamports(), 4_000_000);
     }
 
     #[test]

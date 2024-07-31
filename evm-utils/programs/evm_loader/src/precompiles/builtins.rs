@@ -175,7 +175,7 @@ pub static ETH_TO_VLX_ADDR: Lazy<H160> = Lazy::new(|| {
     .expect("Serialization of static data should be determenistic and never fail.")
 });
 
-type EthToVlxImp = PromiseFunc<
+type EthToVlxImpl = PromiseFunc<
     fn(Pubkey, NativeContext) -> Result<(PrecompileOutput, u64, Vec<EthToVlxResult>)>,
     fn(AccountStructure, EthToVlxResult) -> Result<()>,
     Pubkey,
@@ -188,7 +188,7 @@ pub struct EthToVlxResult {
     amount: u64,
 }
 
-pub static ETH_TO_VLX_CODE: Lazy<NativeContract<EthToVlxImp, Pubkey>> = Lazy::new(|| {
+pub static ETH_TO_VLX_CODE: Lazy<NativeContract<EthToVlxImpl, Pubkey>> = Lazy::new(|| {
     #[allow(deprecated)]
     let abi = Function {
         name: String::from("transferToNative"),
