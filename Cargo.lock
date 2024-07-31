@@ -1537,6 +1537,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "804c8821570c3f8b70230c2ba75ffa5c0f9a4189b9a432b6656c536712acae28"
+dependencies = [
+ "cfg-if 1.0.0",
+ "crossbeam-utils 0.8.16",
+ "hashbrown 0.14.0",
+ "lock_api 0.4.10",
+ "once_cell",
+ "parking_lot_core 0.9.8",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7421,6 +7435,7 @@ version = "1.10.41"
 dependencies = [
  "base64 0.13.1",
  "bincode",
+ "dashmap 6.0.1",
  "enum-iterator",
  "evm-state",
  "itertools",

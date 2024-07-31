@@ -36,6 +36,7 @@
 pub use evm::VelasEVM;
 use evm_state::EvmState;
 use solana_evm_loader_program::processor::EvmProcessor;
+use solana_program_runtime::evm_executor_context::StateExt;
 use solana_program_runtime::evm_executor_context::{
     BlockHashEvm, ChainID, EvmBank, EvmExecutorContext,
 };
@@ -1017,6 +1018,7 @@ pub(crate) struct BankFieldsToSerialize<'a> {
     pub(crate) evm_chain_id: u64,
     pub(crate) evm_persist_fields: evm_state::EvmPersistState,
     pub(crate) evm_blockhashes: &'a RwLock<BlockHashEvm>,
+    pub(crate) evm_side_chains: HashMap<ChainID, evm_state::EvmPersistState>,
     pub(crate) accounts_data_len: u64,
 }
 
@@ -1663,8 +1665,11 @@ impl Bank {
                     .state()
                     .new_from_parent(parent.clock().unix_timestamp as u64, spv_compatibility);
 
+                let subchain_roots = parent.evm.subchain_roots();
+
+                // TODO: feature_subchain
                 evm_state
-                    .register_slot(slot)
+                    .register_slot(slot, subchain_roots)
                     .expect("failed to mark slot reference");
                 evm_state
             },
@@ -2201,6 +2206,12 @@ impl Bank {
             evm_blockhashes: &self.evm().main_chain().blockhashes_raw(),
             evm_chain_id: self.evm.main_chain().id(),
             evm_persist_fields: self.evm.main_chain().state().clone().save_state(),
+            evm_side_chains: self
+                .evm
+                .side_chains()
+                .iter()
+                .map(|s| (*s.key(), s.value().state().clone().save_state()))
+                .collect(),
             ancestors,
             hash: *self.hash.read().unwrap(),
             parent_hash: self.parent_hash,
@@ -4769,15 +4780,21 @@ impl Bank {
             let chain_name = chain
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "main".to_string());
-            let mut evm_state = if chain.is_none() {
-                self.evm.main_chain().state_write()
-            } else {
-                self.evm.chain_state(chain.unwrap()).state_write()
-            };
 
-            trace!("Updating evm {chain_name} state, before = {:?}", *evm_state);
-            trace!("Updating evm {chain_name} state, after = {:?}", patch);
-            *evm_state = patch.into()
+            trace!(
+                "Updating evm {chain_name} state, applying new_state = {:?}",
+                patch
+            );
+            if chain.is_none() {
+                let mut evm_state = self.evm.main_chain().state_write();
+                trace!("Updating evm {chain_name} state, before = {:?}", *evm_state);
+                *evm_state = patch.into()
+            } else {
+                // different lock types
+                let mut evm_state = self.evm.chain_state_write(chain.unwrap()).state();
+                trace!("Updating evm {chain_name} state, before = {:?}", *evm_state);
+                *evm_state = patch.into()
+            };
         }
 
         // once committed there is no way to unroll
@@ -5925,10 +5942,13 @@ impl Bank {
 
         self.builtin_feature_transitions = Arc::new(builtins.feature_transitions);
 
+        let subchain_roots = self.evm.subchain_roots();
+
+        // TODO: feature_subchain
         self.evm
             .main_chain()
             .state_write()
-            .reregister_slot(self.slot())
+            .reregister_slot(self.slot(), subchain_roots)
             .expect("cannot register slot");
 
         self.apply_feature_activations(true, debug_do_not_add_builtins);
@@ -7147,8 +7167,9 @@ impl Drop for Bank {
     fn drop(&mut self) {
         use evm_state::{storage, Storage};
         fn handle_evm_error(storage: &Storage, slot: u64) -> storage::Result<()> {
-            if let Some(h) = storage.purge_slot(slot)? {
-                let mut cleaner = evm_state::storage::RootCleanup::new(storage, vec![h]);
+            let removed_roots = storage.purge_slot(slot)?;
+            if !removed_roots.is_empty() {
+                let mut cleaner = evm_state::storage::RootCleanup::new(storage, removed_roots);
                 cleaner.cleanup()?
             }
             Ok(())
@@ -7163,7 +7184,7 @@ impl Drop for Bank {
                 .accounts
                 .purge_slot(self.slot(), self.bank_id(), true);
 
-            if let Err(e) = handle_evm_error(self.evm().main_chain().state().kvs(), self.slot()) {
+            if let Err(e) = handle_evm_error(&self.evm().kvs(), self.slot()) {
                 error!("Cannot purge evm_state slot: {}, error: {}", self.slot(), e)
                 //TODO: Save last hashes list, to perform cleanup if it was recoverable error.
             }
