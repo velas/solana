@@ -1219,9 +1219,10 @@ impl TraceERPC for TraceErpcImpl {
                     tx_hash,
                     true,
                     simulation_entrypoint(
-                        PrecompileSet::VelasClassic,
+                        PrecompileSet::VelasClassic, // FIXME: encapsulate under feature activation
                         &evm_keyed_account,
                         &user_accounts,
+                        false, // FIXME: need a way to determine subchain/mainchain
                     ),
                 )
                 .with_context(|_err| EvmStateError)?;
@@ -1574,9 +1575,10 @@ fn call_inner(
             tx_hash,
             true,
             simulation_entrypoint(
-                PrecompileSet::VelasClassic,
+                PrecompileSet::VelasClassic, // FIXME: encapsulate under feature activation
                 &evm_keyed_account,
                 &user_accounts,
+                executor.chain_id() != bank.evm().main_chain().id(), // TODO: Better way?
             ),
         )
         .with_context(|_| EvmStateError)?;
