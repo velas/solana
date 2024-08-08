@@ -179,6 +179,8 @@ impl<'a> AccountInfo<'a> {
         Ok(())
     }
 
+    // from solana main rep !
+    #[rustversion::attr(since(1.72), allow(invalid_reference_casting))]
     pub fn assign(&self, new_owner: &Pubkey) {
         // Set the non-mut owner field
         unsafe {

@@ -990,7 +990,7 @@ mod evmtests {
         solana_logger::setup_with("trace");
         let tx = solana_evm_loader_program::processor::dummy_call(0).0;
         let receiver = tx.caller().unwrap();
-        let (genesis_config, mint_keypair) = create_genesis_config(LAMPORTS_PER_VLX * 1_000_000);
+        let (genesis_config, mint_keypair) = create_genesis_config(LAMPORTS_PER_VLX * 1_000_001);
         let mut bank = Bank::new_for_tests(&genesis_config);
 
         bank.activate_feature(&feature_set::velas::native_swap_in_evm_history::id());
@@ -1005,7 +1005,7 @@ mod evmtests {
             recent_hash,
             20000,
         );
-        let res = bank.process_transaction(&tx).unwrap();
+        let _res = bank.process_transaction(&tx).unwrap();
 
         let hash_before = bank.evm.main_chain().state().last_root();
 
@@ -1026,7 +1026,7 @@ mod evmtests {
         log::debug!("subchain_evm_state: {:?}", *subchain_evm_state);
         assert_eq!(subchain_evm_state.processed_tx_len(), 1);
         let account = bank.get_account(&mint_keypair.pubkey()).unwrap_or_default();
-        assert_eq!(account.lamports(), 0);
+        assert_eq!(account.lamports(), LAMPORTS_PER_VLX * 1);
 
         let state = subchain_evm_state
             .get_account_state(receiver)

@@ -1,0 +1,27 @@
+[package]
+name = "subchain-manager"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+inquire = "0.7.5"
+interactive-clap = "0.2.10"
+clap = { version = "4.0.18", features = ["derive"] }
+shell-words = "1.1.0"
+
+color-eyre = "0.6"
+strum = { version = "0.24", features = ["derive"] }
+strum_macros = "0.24"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+
+solana-evm-loader-program = { path = "../programs/evm_loader" }
+solana-sdk = { path = "../../sdk", version = "1.9.13" }
+solana-client = { path = "../../client", version = "1.9.13" }
+solana-cli-config = { path = "../../cli-config", version = "1.9.13" }
+solana-core = { path = "../../core", version = "1.9.13" }
+solana-rpc = { path = "../../rpc", version = "1.9.13" }
+evm-state = { path = "../evm-state" }
+# evm-bridge = { path = "../evm-bridge" }

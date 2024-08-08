@@ -2757,6 +2757,7 @@ impl<'a, 'b> SyscallInvokeSigned<'a, 'b> for SyscallInvokeSignedC<'a, 'b> {
         })
     }
 
+    #[rustversion::attr(since(1.72), allow(invalid_reference_casting))]
     fn translate_accounts<'c>(
         &'c self,
         loader_id: &Pubkey,

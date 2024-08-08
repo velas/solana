@@ -1,36 +1,37 @@
-use std::cell::RefMut;
-use std::fmt::Write;
-use std::ops::DerefMut;
-
-use super::account_structure::AccountStructure;
-use super::instructions::{
-    EvmBigTransaction, EvmInstruction, EvmSubChain, ExecuteTransaction, FeePayerType,
-    SubchainConfig, EVM_INSTRUCTION_BORSH_PREFIX,
+use {
+    super::{
+        account_structure::AccountStructure,
+        error::EvmError,
+        instructions::{
+            EvmBigTransaction, EvmInstruction, EvmSubChain, ExecuteTransaction, FeePayerType,
+            SubchainConfig, EVM_INSTRUCTION_BORSH_PREFIX,
+        },
+        precompiles,
+        scope::*,
+        tx_chunks::TxChunks,
+    },
+    borsh::BorshDeserialize,
+    evm::{gweis_to_lamports, lamports_to_gwei, Executor, ExitReason},
+    evm_state::{ExecutionResult, H160, U256},
+    log::*,
+    serde::de::DeserializeOwned,
+    solana_program_runtime::{
+        evm_executor_context::{ChainID, ChainParam},
+        ic_msg,
+        invoke_context::InvokeContext,
+    },
+    solana_sdk::{
+        account::{AccountSharedData, ReadableAccount, WritableAccount},
+        borsh::{get_instance_packed_len, get_packed_len},
+        instruction::InstructionError,
+        keyed_account::KeyedAccount,
+        native_token::LAMPORTS_PER_VLX,
+        program_utils::limited_deserialize,
+        pubkey::Pubkey,
+        system_instruction,
+    },
+    std::{cell::RefMut, fmt::Write, ops::DerefMut},
 };
-use super::precompiles;
-use super::scope::*;
-use evm_state::{H160, U256};
-use log::*;
-
-use borsh::BorshDeserialize;
-use evm::{gweis_to_lamports, lamports_to_gwei, Executor, ExitReason};
-use evm_state::ExecutionResult;
-use serde::de::DeserializeOwned;
-use solana_program_runtime::evm_executor_context::{ChainID, ChainParam};
-use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
-use solana_sdk::borsh::{get_instance_packed_len, get_packed_len};
-use solana_sdk::{
-    account::{AccountSharedData, ReadableAccount, WritableAccount},
-    instruction::InstructionError,
-    keyed_account::KeyedAccount,
-    native_token::LAMPORTS_PER_VLX,
-    program_utils::limited_deserialize,
-    pubkey::Pubkey,
-    system_instruction,
-};
-
-use super::error::EvmError;
-use super::tx_chunks::TxChunks;
 
 pub const BURN_ADDR: evm_state::H160 = evm_state::H160::zero();
 
@@ -874,6 +875,20 @@ impl EvmProcessor {
             );
             return Err(EvmError::InvalidSubchainId);
         }
+        if config.network_name.len() > 32 {
+            ic_msg!(
+                invoke_context,
+                "Network name is too long, max 32 bytes allowed."
+            );
+            return Err(EvmError::InvalidSubchainConfig);
+        }
+        if config.token_name.len() > 10 {
+            ic_msg!(
+                invoke_context,
+                "Token name is too long, max 10 bytes allowed."
+            );
+            return Err(EvmError::InvalidSubchainConfig);
+        }
 
         let (evm_subchain_state_pda, _bump_seed) = Pubkey::find_program_address(
             &[b"evm_subchain", &subchain_id.to_be_bytes()],
@@ -942,12 +957,16 @@ impl EvmProcessor {
 
         drop(evm_subchain_state_borrow);
 
+        let mint_setup = config.mint.clone();
+        // write config into subchain state, and save owner.
+        let state = crate::subchain::SubchainState::new(config, whale_pubkey);
+
         // Create subchain account
         let create_account_ix = system_instruction::create_account(
             &whale_pubkey,
             &evm_subchain_state_pubkey,
             SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX,
-            get_packed_len::<crate::subchain::SubchainState>() as u64,
+            state.len()? as u64,
             &solana_sdk::evm_loader::ID,
         );
 
@@ -974,16 +993,14 @@ impl EvmProcessor {
         // TODO: Drop executor on error?
         // Load pre-seed
 
-        trace!("mint:{:?}", config.mint);
-        for (evm_address, lamports) in &config.mint {
+        trace!("mint:{:?}", mint_setup);
+        for (evm_address, lamports) in &mint_setup {
             let gweis = lamports_to_gwei(*lamports);
             executor.deposit(*evm_address, gweis);
             executor.register_swap_tx_in_evm(H160::zero(), *evm_address, gweis);
         }
         trace!("executor:{:?}", executor);
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
-        // write config into subchain state, and save owner.
-        let state = crate::subchain::SubchainState::new(config, whale_pubkey);
         // serialize data into account.
         state.save(accounts)
     }
@@ -1066,48 +1083,49 @@ pub fn dummy_call(nonce: usize) -> (evm::Transaction, evm::UnsignedTransaction) 
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use evm_state::{
-        empty_trie_hash,
-        transactions::{TransactionAction, TransactionSignature},
-        AccountState, EvmBackend, FromKey, Incomming,
+    use {
+        super::*,
+        evm_state::{
+            empty_trie_hash,
+            transactions::{TransactionAction, TransactionSignature},
+            AccountProvider, AccountState, EvmBackend, ExitReason, ExitSucceed, FromKey, Incomming,
+        },
+        hex_literal::hex,
+        num_traits::Zero,
+        primitive_types::{H160, H256, U256},
+        solana_program_runtime::{
+            compute_budget::ComputeBudget,
+            evm_executor_context::{self, BlockHashEvm, EvmBank, EvmChain, EvmExecutorContext},
+            invoke_context::{BuiltinProgram, InvokeContext},
+            timings::ExecuteTimings,
+        },
+        solana_sdk::{
+            account::Account,
+            feature_set::{self, velas::evm_new_error_handling},
+            instruction::{AccountMeta, CompiledInstruction, Instruction},
+            keyed_account::{get_signers, keyed_account_at_index},
+            message::{Message, SanitizedMessage},
+            native_loader,
+            program_utils::limited_deserialize,
+            pubkey::Pubkey,
+            system_program,
+            sysvar::rent::Rent,
+            transaction_context::{InstructionAccount, TransactionContext},
+        },
+        system_instruction::{SystemError, SystemInstruction, MAX_PERMITTED_DATA_LENGTH},
     };
-    use evm_state::{AccountProvider, ExitReason, ExitSucceed};
-    use hex_literal::hex;
-    use num_traits::Zero;
-    use primitive_types::{H160, H256, U256};
-    use solana_program_runtime::{
-        compute_budget::ComputeBudget,
-        evm_executor_context::{self, BlockHashEvm, EvmBank, EvmChain, EvmExecutorContext},
-        invoke_context::{BuiltinProgram, InvokeContext},
-        timings::ExecuteTimings,
-    };
-    use solana_sdk::{
-        account::Account,
-        feature_set::{self, velas::evm_new_error_handling},
-        keyed_account::{get_signers, keyed_account_at_index},
-        system_program,
-        sysvar::rent::Rent,
-    };
-    use solana_sdk::{instruction::CompiledInstruction, pubkey::Pubkey};
-    use solana_sdk::{
-        instruction::{AccountMeta, Instruction},
-        message::{Message, SanitizedMessage},
-    };
-    use solana_sdk::{native_loader, transaction_context::TransactionContext};
-    use solana_sdk::{program_utils::limited_deserialize, transaction_context::InstructionAccount};
-    use system_instruction::{SystemError, SystemInstruction, MAX_PERMITTED_DATA_LENGTH};
     type MutableAccount = AccountSharedData;
 
-    use super::TEST_CHAIN_ID as CHAIN_ID;
-    use borsh::BorshSerialize;
-    use std::{
-        cell::RefCell,
-        collections::{BTreeMap, BTreeSet},
-        sync::RwLock,
+    use {
+        super::TEST_CHAIN_ID as CHAIN_ID,
+        borsh::BorshSerialize,
+        std::{
+            cell::RefCell,
+            collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+            rc::Rc,
+            sync::{Arc, RwLock},
+        },
     };
-    use std::{collections::HashMap, rc::Rc};
-    use std::{collections::HashSet, sync::Arc};
 
     // Testing object that emulate Bank work, and can execute transactions.
     // Emulate batch of native transactions.
@@ -1517,7 +1535,7 @@ mod test {
                 ) {
                     dbg!(&e);
                     let Some((chain_id, executor)) = invoke_context.deconstruct_evm() else {
-                        // skip apply 
+                        // skip apply
                         return Err(e);
                     };
 
@@ -3216,10 +3234,12 @@ mod test {
 
     #[test]
     fn check_tx_mtu_is_in_solanas_limit() {
-        use solana_sdk::hash::hash;
-        use solana_sdk::message::Message;
-        use solana_sdk::signature::{Keypair, Signer};
-        use solana_sdk::transaction::Transaction;
+        use solana_sdk::{
+            hash::hash,
+            message::Message,
+            signature::{Keypair, Signer},
+            transaction::Transaction,
+        };
 
         let storage = Keypair::new();
         let bridge = Keypair::new();

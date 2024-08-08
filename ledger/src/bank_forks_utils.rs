@@ -32,9 +32,10 @@ pub type LoadResult = result::Result<
     BlockstoreProcessorError,
 >;
 
-use std::path::Path;
-
-use evm_state::{ChangedState, H256};
+use {
+    evm_state::{ChangedState, H256},
+    std::path::Path,
+};
 
 pub type EvmStateRecorderSender = crossbeam_channel::Sender<(H256, ChangedState)>;
 pub type EvmRecorderSender = crossbeam_channel::Sender<evm_state::Block>;
@@ -72,8 +73,6 @@ pub fn load(
             shrink_paths,
             snapshot_config,
             &process_options,
-            evm_block_recorder_sender,
-            evm_state_recorder_sender,
             cache_block_meta_sender,
             verify_evm_state,
             evm_archive,
@@ -106,8 +105,6 @@ pub fn load_bank_forks(
     shrink_paths: Option<Vec<PathBuf>>,
     snapshot_config: Option<&SnapshotConfig>,
     process_options: &ProcessOptions,
-    evm_block_recorder_sender: Option<&EvmRecorderSender>,
-    evm_state_recorder_sender: Option<&EvmStateRecorderSender>,
     cache_block_meta_sender: Option<&CacheBlockMetaSender>,
     verify_evm_state: bool,
     evm_archive: Option<evm_state::Storage>,
@@ -152,8 +149,6 @@ pub fn load_bank_forks(
             shrink_paths,
             snapshot_config.as_ref().unwrap(),
             process_options,
-            evm_block_recorder_sender,
-            evm_state_recorder_sender,
             accounts_update_notifier,
         )
     } else {
@@ -241,8 +236,6 @@ fn bank_forks_from_snapshot(
     shrink_paths: Option<Vec<PathBuf>>,
     snapshot_config: &SnapshotConfig,
     process_options: &ProcessOptions,
-    evm_block_recorder_sender: Option<&EvmRecorderSender>,
-    evm_state_recorder_sender: Option<&EvmStateRecorderSender>,
     accounts_update_notifier: Option<AccountsUpdateNotifier>,
 ) -> (BankForks, Option<StartingSnapshotHashes>) {
     // Fail hard here if snapshot fails to load, don't silently continue

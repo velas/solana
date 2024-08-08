@@ -81,6 +81,9 @@ pub enum EvmError {
 
     #[snafu(display("Invalid subchain id."))]
     InvalidSubchainId,
+
+    #[snafu(display("Invalid subchain config."))]
+    InvalidSubchainConfig,
 }
 
 impl<E> DecodeError<E> for EvmError {

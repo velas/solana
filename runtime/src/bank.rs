@@ -33,18 +33,8 @@
 //! It offers a high-level API that signs transactions
 //! on behalf of the caller, and a low-level API for when they have
 //! already been signed and verified.
-pub use evm::VelasEVM;
-use evm_state::EvmState;
-use solana_evm_loader_program::processor::EvmProcessor;
-use solana_program_runtime::evm_executor_context::StateExt;
-use solana_program_runtime::evm_executor_context::{
-    BlockHashEvm, ChainID, EvmBank, EvmExecutorContext,
-};
-use solana_sdk::message::AccountKeys;
 #[allow(deprecated)]
 use solana_sdk::recent_blockhashes_account;
-pub use solana_sdk::reward_type::RewardType;
-
 use {
     crate::{
         account_overrides::AccountOverrides,
@@ -78,7 +68,7 @@ use {
     },
     byteorder::{ByteOrder, LittleEndian},
     dashmap::DashMap,
-    evm_state::AccountProvider,
+    evm_state::{AccountProvider, EvmState},
     itertools::Itertools,
     log::*,
     rand::Rng,
@@ -86,11 +76,13 @@ use {
         iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
         ThreadPool, ThreadPoolBuilder,
     },
+    solana_evm_loader_program::processor::EvmProcessor,
     solana_measure::measure::Measure,
     solana_metrics::{inc_new_counter_debug, inc_new_counter_info},
     solana_program_runtime::{
         accounts_data_meter::MAX_ACCOUNTS_DATA_LEN,
         compute_budget::{self, ComputeBudget},
+        evm_executor_context::{BlockHashEvm, ChainID, EvmBank, EvmExecutorContext, StateExt},
         invoke_context::{
             BuiltinProgram, Executor, Executors, ProcessInstructionWithContext, TransactionExecutor,
         },
@@ -127,7 +119,7 @@ use {
         inflation::Inflation,
         instruction::CompiledInstruction,
         lamports::LamportsError,
-        message::SanitizedMessage,
+        message::{AccountKeys, SanitizedMessage},
         native_loader,
         native_token::sol_to_lamports,
         nonce::{self, state::DurableNonce, NONCED_TX_MARKER_IX_INDEX},
@@ -172,6 +164,7 @@ use {
         time::{Duration, Instant},
     },
 };
+pub use {evm::VelasEVM, solana_sdk::reward_type::RewardType};
 
 #[derive(Debug, Default)]
 struct RewardsMetrics {
@@ -1655,7 +1648,7 @@ impl Bank {
             "fee_components_creation",
         );
 
-        let (evm_state, evm_state_time) = Measure::this(
+        let ((evm_state, subchains), evm_state_time) = Measure::this(
             |_| {
                 let spv_compatibility = parent.fix_spv_proofs_evm();
 
@@ -1665,13 +1658,29 @@ impl Bank {
                     .state()
                     .new_from_parent(parent.clock().unix_timestamp as u64, spv_compatibility);
 
-                let subchain_roots = parent.evm.subchain_roots();
+                let subchains: HashMap<_, _> = parent
+                    .evm
+                    .side_chains()
+                    .iter()
+                    .map(|k| {
+                        let id = k.key();
+                        let evm_state = k.value();
+                        let state = evm_state.evm_state.new_from_parent(
+                            parent.clock().unix_timestamp as u64,
+                            spv_compatibility,
+                        );
+                        (*id, state)
+                    })
+                    .collect();
+
+                let subchain_roots = subchains.iter().map(|c| c.1.last_root()).collect();
 
                 // TODO: feature_subchain
                 evm_state
                     .register_slot(slot, subchain_roots)
                     .expect("failed to mark slot reference");
-                evm_state
+
+                (evm_state, subchains)
             },
             (),
             "evm_state_register",
@@ -1742,11 +1751,11 @@ impl Bank {
             epoch,
             blockhash_queue,
 
-            evm: EvmBank::from_parent(
+            evm: EvmBank::new(
                 parent.evm.main_chain().id(),
                 parent.evm.main_chain().blockhashes().clone(),
                 evm_state,
-                parent.evm.side_chains().clone(),
+                subchains,
             ),
 
             // TODO: clean this up, so much special-case copying...
@@ -7209,7 +7218,6 @@ pub fn goto_end_of_slot(bank: &mut Bank) {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use evm_state::FromKey;
     #[allow(deprecated)]
     use solana_sdk::sysvar::fees::Fees;
     use {
@@ -7228,7 +7236,7 @@ pub(crate) mod tests {
             status_cache::MAX_CACHE_ENTRIES,
         },
         crossbeam_channel::{bounded, unbounded},
-        evm_state::H256,
+        evm_state::{FromKey, H256},
         solana_program_runtime::{
             accounts_data_meter::MAX_ACCOUNTS_DATA_LEN,
             compute_budget::MAX_COMPUTE_UNIT_LIMIT,

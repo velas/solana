@@ -245,22 +245,6 @@ impl EvmBank {
                 .collect(),
         }
     }
-    pub fn from_parent(
-        evm_chain_id: ChainID,
-        evm_blockhashes: BlockHashEvm,
-        evm_state: evm_state::EvmState,
-        side_chains: DashMap<ChainID, EvmChain>,
-    ) -> Self {
-        Self {
-            main_chain: MainChain {
-                chain_id: evm_chain_id,
-                evm_blockhashes: RwLock::new(evm_blockhashes),
-                evm_state: RwLock::new(evm_state),
-                evm_changed_list: RwLock::new(None),
-            },
-            side_chains,
-        }
-    }
 
     pub fn kvs(&self) -> evm_state::Storage {
         self.main_chain.state().kvs().clone()
@@ -373,6 +357,11 @@ pub enum EvmExecutorContextType {
 pub enum PatchStrategy {
     ApplyFailed,
     SetNew,
+}
+impl PatchStrategy {
+    pub fn success(&self, new_error_handling: bool) -> bool {
+        new_error_handling && matches!(self, PatchStrategy::SetNew)
+    }
 }
 
 type Chain = Option<ChainID>;
@@ -616,7 +605,9 @@ impl EvmExecutorContext {
             let Some((chain_id, executor)) = self
                 .active_executor
                 .take() else {
-                    log::error!("Executor was not created, on cleanup.");
+                    if strategy.success(self.evm_new_error_handling){
+                        log::error!("Executor was not created, on cleanup, but execution success.");
+                    }
                     return;
                 };
             (

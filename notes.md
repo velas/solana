@@ -96,7 +96,7 @@ Update transaction-statuses
 1. Tokenomics - how many tokens? 1 mill vlx? + cap for fees = Mixed fee payer model (burn vlx from evm_state_account + charge_XXX_token_from_user_in_subchain_evm)
 2. EVM fee for bridge ?
 3. chain_id - blacklist (chainlist.org top100) (PREFIX V 0x56)
-
+4. last_root - for subchain
 
 TODO: Add name chain 
 
@@ -123,3 +123,6 @@ RPC URL: ?
 
 Todo: Add test for register slot with subchains
 Todo: disable incremental for now
+Blockhashqueue for subchain.
+Store blocks for subchain.
+Finalized block for rpc call.

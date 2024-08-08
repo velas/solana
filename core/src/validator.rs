@@ -1503,12 +1503,6 @@ fn load_blockstore(
         config.snapshot_config.as_ref(),
         &process_options,
         transaction_history_services
-            .evm_block_recorder_sender
-            .as_ref(),
-        transaction_history_services
-            .evm_state_recorder_sender
-            .as_ref(),
-        transaction_history_services
             .cache_block_meta_sender
             .as_ref(),
         config.verify_evm_state,
