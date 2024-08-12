@@ -1,34 +1,32 @@
-use std::str::FromStr;
-
-use sha3::{Digest, Keccak256};
-use solana_evm_loader_program::processor::BURN_ADDR;
-use solana_sdk::account::{AccountSharedData, ReadableAccount};
-use solana_sdk::commitment_config::CommitmentConfig;
-use solana_sdk::keyed_account::KeyedAccount;
-use solana_sdk::pubkey::Pubkey;
-
-use crate::rpc::JsonRpcRequestProcessor;
-use crate::rpc_health::RpcHealthStatus;
-use evm_rpc::error::EvmStateError;
-use evm_rpc::{
-    chain::ChainERPC,
-    chain::ChainIDERPC,
-    error::{into_native_error, BlockNotFound, Error, StateNotFoundForBlock},
-    general::GeneralERPC,
-    trace::{TraceERPC, TraceMeta},
-    BlockId, BlockRelId, Bytes, ChainID, Either, Hex, RPCBlock, RPCLog, RPCLogFilter, RPCReceipt,
-    RPCTopicFilter, RPCTransaction,
+use {
+    crate::{rpc::JsonRpcRequestProcessor, rpc_health::RpcHealthStatus},
+    evm_rpc::{
+        chain::ChainERPC,
+        chain_id_rpc::ChainIDERPC,
+        error::{into_native_error, BlockNotFound, Error, EvmStateError, StateNotFoundForBlock},
+        general::GeneralERPC,
+        trace::{TraceERPC, TraceMeta},
+        BlockId, BlockRelId, Bytes, ChainID, Either, Hex, RPCBlock, RPCLog, RPCLogFilter,
+        RPCReceipt, RPCTopicFilter, RPCTransaction,
+    },
+    evm_state::{
+        AccountProvider, AccountState, Address, Block, BlockHeader, Committed, ExecutionResult,
+        Gas, LogFilter, Transaction, TransactionAction, TransactionInReceipt, TransactionReceipt,
+        TransactionSignature, UnsignedTransactionWithCaller, H160, H256, U256,
+    },
+    jsonrpc_core::BoxFuture,
+    sha3::{Digest, Keccak256},
+    snafu::{ensure, ResultExt},
+    solana_evm_loader_program::processor::BURN_ADDR,
+    solana_runtime::bank::Bank,
+    solana_sdk::{
+        account::{AccountSharedData, ReadableAccount},
+        commitment_config::CommitmentConfig,
+        keyed_account::KeyedAccount,
+        pubkey::Pubkey,
+    },
+    std::{cell::RefCell, future::ready, str::FromStr, sync::Arc},
 };
-use evm_state::{
-    AccountProvider, AccountState, Address, Block, BlockHeader, Committed, ExecutionResult, Gas,
-    LogFilter, Transaction, TransactionAction, TransactionInReceipt, TransactionReceipt,
-    TransactionSignature, UnsignedTransactionWithCaller, H160, H256, U256,
-};
-use jsonrpc_core::BoxFuture;
-use snafu::ensure;
-use snafu::ResultExt;
-use solana_runtime::bank::Bank;
-use std::{cell::RefCell, future::ready, sync::Arc};
 
 const GAS_PRICE: u64 = 3;
 
@@ -109,23 +107,36 @@ async fn block_to_state_root(
     block: Option<BlockId>,
     meta: &JsonRpcRequestProcessor,
 ) -> Result<StateRootWithBank, Error> {
-    if chain_id != meta.get_main_chain_id() {
-        return Err(Error::InvalidParams {});
-    }
+    let main_chain = chain_id == meta.get_main_chain_id();
 
     let block_id = block.unwrap_or_default();
 
     let mut found_block_hash = None;
 
+    // TODO: add logic for block by num
+    match block_id {
+        BlockId::RelativeId(BlockRelId::Pending) | BlockId::RelativeId(BlockRelId::Latest) => {}
+        _ => {
+            if !main_chain {
+                return Err(Error::InvalidParams {});
+            }
+        }
+    }
+
     let block_num = match block_id {
         BlockId::RelativeId(BlockRelId::Pending) | BlockId::RelativeId(BlockRelId::Latest) => {
             let bank = meta.bank(Some(CommitmentConfig::processed()));
-            let evm = bank.evm().main_chain().state();
-            let last_root = evm.last_root();
-            drop(evm);
+            let (bank, last_root) = if main_chain {
+                let evm = bank.evm().main_chain().state();
+                let last_root = evm.last_root();
+                drop(evm);
+                (Some(bank), last_root)
+            } else {
+                (None, bank.evm().chain_state(chain_id).evm_state.last_root())
+            };
             return Ok(StateRootWithBank {
                 state_root: Some(last_root),
-                bank: Some(bank),
+                bank,
                 block: block_id,
                 block_timestamp: None,
             });

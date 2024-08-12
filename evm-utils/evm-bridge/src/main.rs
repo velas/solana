@@ -181,7 +181,9 @@ pub struct EvmBridge {
     whitelist: Vec<TxFilter>,
     pub batch_state_map: BatchStateMap,
     max_batch_duration: Option<Duration>,
+    subchain: bool,
 }
+type ChainID = u64;
 
 impl EvmBridge {
     fn new(
@@ -194,6 +196,7 @@ impl EvmBridge {
         simulate: bool,
         max_logs_blocks: u64,
         min_gas_price: U256,
+        subchain: bool,
     ) -> Self {
         info!("EVM chain id {}", evm_chain_id);
 
@@ -230,6 +233,7 @@ impl EvmBridge {
             whitelist: vec![],
             batch_state_map: Default::default(),
             max_batch_duration: None,
+            subchain,
         }
     }
 
@@ -1041,6 +1045,7 @@ async fn main() -> StdResult<(), Box<dyn std::error::Error>> {
         !args.no_simulate,
         args.max_logs_block_count,
         min_gas_price,
+        args.subchain,
     );
     meta.set_whitelist(whitelist);
     meta.set_max_batch_duration(args.rpc_max_batch_time);
@@ -1220,6 +1225,7 @@ mod tests {
             whitelist: vec![],
             batch_state_map: Default::default(),
             max_batch_duration: None,
+            subchain: false,
         });
 
         let rpc = BridgeErpcImpl {};

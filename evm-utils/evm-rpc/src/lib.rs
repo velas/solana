@@ -854,12 +854,22 @@ pub mod chain {
             block: String,
         ) -> Result<Hex<usize>, Error>;
     }
+}
+pub mod chain_id_rpc {
 
+    use super::*;
+    #[rpc]
     pub trait ChainIDERPC {
         type Metadata;
 
-        fn block_number(&self, meta: Self::Metadata, chain_id: ChainID) -> BoxFuture<Result<Hex<usize>, Error>>;
+        #[rpc(meta, name = "vlx_blockNumber")]
+        fn block_number(
+            &self,
+            meta: Self::Metadata,
+            chain_id: ChainID,
+        ) -> BoxFuture<Result<Hex<usize>, Error>>;
 
+        #[rpc(meta, name = "vlx_getBalance")]
         fn balance(
             &self,
             meta: Self::Metadata,
@@ -868,6 +878,7 @@ pub mod chain {
             block: Option<BlockId>,
         ) -> BoxFuture<Result<U256, Error>>;
 
+        #[rpc(meta, name = "vlx_getStorageAt")]
         fn storage_at(
             &self,
             meta: Self::Metadata,
@@ -877,6 +888,7 @@ pub mod chain {
             block: Option<BlockId>,
         ) -> BoxFuture<Result<H256, Error>>;
 
+        #[rpc(meta, name = "vlx_getTransactionCount")]
         fn transaction_count(
             &self,
             meta: Self::Metadata,
@@ -885,6 +897,7 @@ pub mod chain {
             block: Option<BlockId>,
         ) -> BoxFuture<Result<U256, Error>>;
 
+        #[rpc(meta, name = "vlx_getBlockTransactionCountByHash")]
         fn block_transaction_count_by_hash(
             &self,
             meta: Self::Metadata,
@@ -892,6 +905,7 @@ pub mod chain {
             block_hash: H256,
         ) -> BoxFuture<Result<Hex<usize>, Error>>;
 
+        #[rpc(meta, name = "vlx_getBlockTransactionCountByNumber")]
         fn block_transaction_count_by_number(
             &self,
             meta: Self::Metadata,
@@ -899,6 +913,7 @@ pub mod chain {
             block: BlockId,
         ) -> BoxFuture<Result<Hex<usize>, Error>>;
 
+        #[rpc(meta, name = "vlx_getCode")]
         fn code(
             &self,
             meta: Self::Metadata,
@@ -907,6 +922,7 @@ pub mod chain {
             block: Option<BlockId>,
         ) -> BoxFuture<Result<Bytes, Error>>;
 
+        #[rpc(meta, name = "vlx_getBlockByHash")]
         fn block_by_hash(
             &self,
             meta: Self::Metadata,
@@ -915,6 +931,7 @@ pub mod chain {
             full: bool,
         ) -> BoxFuture<Result<Option<RPCBlock>, Error>>;
 
+        #[rpc(meta, name = "vlx_getBlockByNumber")]
         fn block_by_number(
             &self,
             meta: Self::Metadata,
@@ -923,6 +940,7 @@ pub mod chain {
             full: bool,
         ) -> BoxFuture<Result<Option<RPCBlock>, Error>>;
 
+        #[rpc(meta, name = "vlx_getTransactionByHash")]
         fn transaction_by_hash(
             &self,
             meta: Self::Metadata,
@@ -930,6 +948,7 @@ pub mod chain {
             tx_hash: H256,
         ) -> BoxFuture<Result<Option<RPCTransaction>, Error>>;
 
+        #[rpc(meta, name = "vlx_getTransactionByBlockHashAndIndex")]
         fn transaction_by_block_hash_and_index(
             &self,
             meta: Self::Metadata,
@@ -938,6 +957,7 @@ pub mod chain {
             tx_id: Hex<usize>,
         ) -> BoxFuture<Result<Option<RPCTransaction>, Error>>;
 
+        #[rpc(meta, name = "vlx_getTransactionByBlockNumberAndIndex")]
         fn transaction_by_block_number_and_index(
             &self,
             meta: Self::Metadata,
@@ -946,6 +966,7 @@ pub mod chain {
             tx_id: Hex<usize>,
         ) -> BoxFuture<Result<Option<RPCTransaction>, Error>>;
 
+        #[rpc(meta, name = "vlx_getTransactionReceipt")]
         fn transaction_receipt(
             &self,
             meta: Self::Metadata,
@@ -953,6 +974,7 @@ pub mod chain {
             tx_hash: H256,
         ) -> BoxFuture<Result<Option<RPCReceipt>, Error>>;
 
+        #[rpc(meta, name = "vlx_call")]
         fn call(
             &self,
             meta: Self::Metadata,
@@ -962,6 +984,7 @@ pub mod chain {
             meta_keys: Option<Vec<String>>,
         ) -> BoxFuture<Result<Bytes, Error>>;
 
+        #[rpc(meta, name = "vlx_estimateGas")]
         fn estimate_gas(
             &self,
             meta: Self::Metadata,
@@ -971,13 +994,13 @@ pub mod chain {
             meta_keys: Option<Vec<String>>,
         ) -> BoxFuture<Result<Gas, Error>>;
 
+        #[rpc(meta, name = "vlx_getLogs")]
         fn logs(
             &self,
             meta: Self::Metadata,
             chain_id: ChainID,
             log_filter: RPCLogFilter,
         ) -> BoxFuture<Result<Vec<RPCLog>, Error>>;
-
     }
 }
 

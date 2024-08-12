@@ -17,9 +17,13 @@ use {
         stakes::Stakes,
     },
     bincode::{self, config::Options, Error},
+    evm_state::AccountProvider,
     log::*,
     rayon::prelude::*,
-    serde::{de::DeserializeOwned, de::Error as _, Deserialize, Serialize},
+    serde::{
+        de::{DeserializeOwned, Error as _},
+        Deserialize, Serialize,
+    },
     solana_measure::measure::Measure,
     solana_sdk::{
         clock::{Epoch, Slot, UnixTimestamp},
@@ -525,7 +529,7 @@ where
                 evm_state::Storage::open_persistent(evm_state_path, enable_gc).map_err(|e| {
                     Error::custom(format!("Unable to restore tmp evm backup storage {}", e))
                 })?;
-            // evm archive is not support sidechains
+            // TODO: evm archive is not support sidechains
             evm_state::storage::copy_and_purge(
                 src,
                 &[evm_archive],
@@ -542,10 +546,7 @@ where
     )
     .map_err(|e| Error::custom(format!("Unable to open EVM state storage {}", e)))?;
 
-    evm_state
-        .kvs()
-        .cleanup_slots(bank_fields.slot, bank_fields.evm_persist_fields.last_root())
-        .map_err(|e| Error::custom(format!("Unable to register slot for evm root {}", e)))?;
+    let storage = evm_state.kvs().clone();
 
     let side_chains = bank_fields
         .evm_side_chains
@@ -553,19 +554,42 @@ where
         .map(|(k, v)| {
             Ok((
                 *k,
-                evm_state::EvmState::load_from(evm_state_path, v.clone(), enable_gc).map_err(
-                    |e| Error::custom(format!("Unable to open EVM state storage {}", e)),
-                )?,
+                match v.clone() {
+                    evm_state::EvmPersistState::Incomming(i) => {
+                        evm_state::EvmBackend::new(i, storage.clone()).into()
+                    }
+                    evm_state::EvmPersistState::Committed(c) => {
+                        evm_state::EvmBackend::new(c, storage.clone()).into()
+                    }
+                },
+                // TODO:: check root exist (currently checked only on cleanup_slots)
             ))
         })
-        .collect::<Result<HashMap<_, _>, bincode::Error>>();
+        .collect::<Result<HashMap<_, evm_state::EvmState>, bincode::Error>>();
+    let side_chains = side_chains?;
+
+    let subchain_roots = side_chains
+        .iter()
+        .map(|(_k, v)| v.last_root())
+        .collect::<Vec<_>>();
+
+    crate::bank::evm::debug_evm_roots(storage, evm_state.last_root(), &subchain_roots);
+
+    evm_state
+        .kvs()
+        .cleanup_slots(
+            bank_fields.slot,
+            bank_fields.evm_persist_fields.last_root(),
+            subchain_roots,
+        )
+        .map_err(|e| Error::custom(format!("Unable to register slot for evm root {}", e)))?;
 
     // if limit_load_slot_count_from_snapshot is set, then we need to side-step some correctness checks beneath this call
     let debug_do_not_add_builtins = limit_load_slot_count_from_snapshot.is_some();
 
     let bank = Bank::new_from_fields(
         evm_state,
-        side_chains?,
+        side_chains,
         bank_rc,
         genesis_config,
         bank_fields,

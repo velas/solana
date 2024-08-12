@@ -12,9 +12,10 @@ pub mod subchain;
 /// Public API for intermediate eth <-> solana transfers
 pub mod scope {
     pub mod evm {
-        pub use evm_state::transactions::*;
-        pub use evm_state::*;
-        pub use primitive_types::H160 as Address;
+        pub use {
+            evm_state::{transactions::*, *},
+            primitive_types::H160 as Address,
+        };
 
         pub const GWEI_PER_LAMPORT: u64 = 1_000_000_000; // Lamports is 1/10^9 of SOLs while GWEI is 1/10^18
 
@@ -42,13 +43,15 @@ pub mod scope {
     }
 }
 
-use instructions::{
-    v0, EvmBigTransaction, EvmInstruction, EvmSubChain, ExecuteTransaction, FeePayerType,
-    SubchainConfig, EVM_INSTRUCTION_BORSH_PREFIX,
+use {
+    instructions::{
+        v0, EvmBigTransaction, EvmInstruction, EvmSubChain, ExecuteTransaction, FeePayerType,
+        SubchainConfig, EVM_INSTRUCTION_BORSH_PREFIX,
+    },
+    scope::*,
+    solana_program_runtime::evm_executor_context::ChainID,
+    solana_sdk::{instruction::AccountMeta, pubkey},
 };
-use scope::*;
-use solana_program_runtime::evm_executor_context::ChainID;
-use solana_sdk::instruction::AccountMeta;
 
 pub static ID: solana::Address = solana_sdk::evm_loader::ID;
 
@@ -101,6 +104,14 @@ pub fn send_raw_tx(
         },
         account_metas,
     )
+}
+
+pub fn evm_state_subchain_account(chain_id: ChainID) -> solana::Address {
+    let (evm_subchain_state_pda, _bump_seed) = solana::Address::find_program_address(
+        &[b"evm_subchain", &chain_id.to_be_bytes()],
+        &solana_sdk::evm_loader::ID,
+    );
+    evm_subchain_state_pda
 }
 pub fn create_evm_subchain_account(
     owner: solana::Address,
@@ -302,8 +313,10 @@ pub fn create_state_account(lamports: u64) -> solana_sdk::account::AccountShared
 /// Native chain address is hashed and prefixed with [0xac, 0xc0] bytes.
 ///
 pub fn evm_address_for_program(program_account: solana::Address) -> evm::Address {
-    use primitive_types::{H160, H256};
-    use sha3::{Digest, Keccak256};
+    use {
+        primitive_types::{H160, H256},
+        sha3::{Digest, Keccak256},
+    };
 
     const ADDR_PREFIX: &[u8] = &[0xAC, 0xC0]; // ACC prefix for each account
 

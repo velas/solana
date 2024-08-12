@@ -176,7 +176,7 @@ struct RewardsMetrics {
 
 mod address_lookup_table;
 mod builtin_programs;
-mod evm;
+pub mod evm;
 mod sysvar_cache;
 mod transaction_account_state_info;
 
@@ -1673,11 +1673,17 @@ impl Bank {
                     })
                     .collect();
 
-                let subchain_roots = subchains.iter().map(|c| c.1.last_root()).collect();
+                let subchain_roots: Vec<_> = subchains.iter().map(|c| c.1.last_root()).collect();
+
+                crate::bank::evm::debug_evm_roots(
+                    evm_state.kvs().clone(),
+                    evm_state.last_root(),
+                    &subchain_roots,
+                );
 
                 // TODO: feature_subchain
                 evm_state
-                    .register_slot(slot, subchain_roots)
+                    .register_slot(slot, subchain_roots.clone())
                     .expect("failed to mark slot reference");
 
                 (evm_state, subchains)
@@ -5953,13 +5959,23 @@ impl Bank {
 
         let subchain_roots = self.evm.subchain_roots();
 
+        crate::bank::evm::debug_evm_roots(
+            self.evm.main_chain().state().kvs().clone(),
+            self.evm.main_chain().state().last_root(),
+            &subchain_roots,
+        );
         // TODO: feature_subchain
         self.evm
             .main_chain()
             .state_write()
-            .reregister_slot(self.slot(), subchain_roots)
+            .reregister_slot(self.slot(), subchain_roots.clone())
             .expect("cannot register slot");
 
+        crate::bank::evm::debug_evm_roots(
+            self.evm.main_chain().state().kvs().clone(),
+            self.evm.main_chain().state().last_root(),
+            &subchain_roots,
+        );
         self.apply_feature_activations(true, debug_do_not_add_builtins);
 
         if self
@@ -6202,6 +6218,9 @@ impl Bank {
         let mut signature_count_buf = [0u8; 8];
         LittleEndian::write_u64(&mut signature_count_buf[..], self.signature_count());
 
+        // TODO: subchain feature
+        let subchain_roots = self.evm.subchain_roots();
+
         let evm_state_root = self.evm.main_chain().state().last_root();
 
         let mut hash = hashv(&[
@@ -6236,7 +6255,8 @@ impl Bank {
              signature_count: {signature_count} \
              last_blockhash: {last_blockhash} \
              capitalization: {capitalization} \
-             evm_state_root: {evm_state_root:?}",
+             evm_state_root: {evm_state_root:?} \
+             subchain_roots: {subchain_roots:?}",
             slot = self.slot(),
             hash = hash,
             accounts_delta = accounts_delta_hash.hash,

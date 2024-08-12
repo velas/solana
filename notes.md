@@ -82,8 +82,6 @@
 
 Create EVM Subchain config and execute mainchain/subchain txs, make sure precompiles are not activated on subchain
 
-
-
 1. Create evm -  add pre-seed
 2. Sanity check - on create subchain create - check if chainid not main.
 3. Test: for native swap and evm swap 
@@ -121,8 +119,19 @@ RPC URL: ?
 ## deploy-bridge:
 
 
-Todo: Add test for register slot with subchains
 Todo: disable incremental for now
-Blockhashqueue for subchain.
-Store blocks for subchain.
 Finalized block for rpc call.
+
+TODO for this week:
+1. Store block in blockstore
+2. (optional) store block in evm archive/bigtable
+3. last-roots for subchain collecting
+4. blockhashes for subchain changing
+5. feature non activating
+6. Precompile ??
+7. Tools TODO fixes
+8. CHain id limit 0x56 prefix (and top100 blacklist)
+9. Mixed fee payer model
+
+tests:
+Todo: Add test for register slot with subchains

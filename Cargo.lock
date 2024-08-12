@@ -2198,6 +2198,7 @@ dependencies = [
  "jsonrpc-http-server",
  "jsonrpc-pubsub 18.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "jsonrpc-ws-server",
+ "lazy_static",
  "log 0.4.19",
  "once_cell",
  "opentelemetry 0.20.0",
@@ -3643,11 +3644,11 @@ checksum = "a91d884b6667cd606bb5a69aa0c99ba811a115fc68915e7056ec08a46e93199a"
 
 [[package]]
 name = "lazy_static"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 dependencies = [
- "spin 0.5.2",
+ "spin 0.9.8",
 ]
 
 [[package]]
@@ -7898,6 +7899,7 @@ dependencies = [
  "rayon",
  "regex",
  "rustc_version 0.4.0",
+ "rustversion",
  "serde",
  "serde_derive",
  "solana-address-lookup-table-program",

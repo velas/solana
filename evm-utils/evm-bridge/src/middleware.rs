@@ -4,7 +4,7 @@ use {
     jsonrpc_core::{
         futures_util::future::{Either, FutureExt},
         Call, Error, ErrorCode, Failure, FutureOutput, FutureResponse, Id, Middleware, Output,
-        Request, Response, Success,
+        Params, Request, Response, Success,
         Version::{self, V2},
     },
     log::{debug, error},
@@ -102,6 +102,12 @@ impl Middleware<Arc<EvmBridge>> for ProxyMiddleware {
         F: FnOnce(Call, Arc<EvmBridge>) -> X + Send,
         X: std::future::Future<Output = Option<Output>> + Send + 'static,
     {
+        let (call, skip_redirect) = match patch_subchain_call(meta.clone(), call.clone()) {
+            Some(subchain_call) => (subchain_call, false),
+            // Skip redirect if method forced for subchain, but not found in the list
+            None => (call, true),
+        };
+
         let call_json = match serde_json::to_string(&call) {
             Ok(str) => str,
             Err(_) => {
@@ -111,6 +117,7 @@ impl Middleware<Arc<EvmBridge>> for ProxyMiddleware {
                 )))))
             }
         };
+
         let (original_call, batch_id) = match restore_original_call(call) {
             Ok((original_call, batch_id)) => (original_call, batch_id),
             Err(call) => {
@@ -118,7 +125,7 @@ impl Middleware<Arc<EvmBridge>> for ProxyMiddleware {
                     move |res| async move {
                         match res {
                             Some(Output::Failure(Failure { jsonrpc, error, id }))
-                                if error.code == ErrorCode::MethodNotFound =>
+                                if error.code == ErrorCode::MethodNotFound && !skip_redirect =>
                             {
                                 redirect(meta, call_json, jsonrpc, id).await
                             }
@@ -143,7 +150,7 @@ impl Middleware<Arc<EvmBridge>> for ProxyMiddleware {
                 .then(move |res| async move {
                     match res {
                         Some(Output::Failure(Failure { jsonrpc, error, id }))
-                            if error.code == ErrorCode::MethodNotFound =>
+                            if error.code == ErrorCode::MethodNotFound && !skip_redirect =>
                         {
                             redirect(meta_cloned, call_json, jsonrpc, id).await
                         }
@@ -159,5 +166,213 @@ impl Middleware<Arc<EvmBridge>> for ProxyMiddleware {
                 })
                 .await
         }))
+    }
+}
+
+fn patch_subchain_call(meta: Arc<EvmBridge>, call: Call) -> Option<Call> {
+    Some(match call {
+        Call::MethodCall(method_call) => {
+            let mut method_call = method_call.clone();
+
+            if meta.subchain {
+                let mut params = match method_call.params {
+                    Params::Array(params) => params,
+                    Params::None => vec![],
+                    _ => {
+                        log::warn!("Invalid params type for method call: {:?}", method_call);
+                        return None;
+                    }
+                };
+                log::debug!("params: {:?}", params);
+                if let Some(method) = subchain_methods_collector::ETH_METHODS
+                    .get(&method_call.method)
+                    .clone()
+                {
+                    method_call.method = method.clone();
+                    // params as array insert at index 0
+                    params = Some(Value::Number(meta.evm_chain_id.into()))
+                        .into_iter()
+                        .chain(params.into_iter())
+                        .collect();
+                } else {
+                    log::warn!("Method not found in subchain: {:?}", method_call.method);
+                    return None;
+                }
+                method_call.params = Params::Array(params);
+                log::trace!("Patched method call: {:?}", method_call);
+            }
+            Call::MethodCall(method_call)
+        }
+        _ => call.clone(),
+    })
+}
+
+mod subchain_methods_collector {
+    use {evm_rpc::chain_id_rpc::ChainIDERPC, std::collections::HashMap};
+
+    lazy_static::lazy_static! {
+        pub static ref ETH_METHODS: HashMap<String, String> = {
+            let mut map = HashMap::new();
+            for method in methods() {
+                let eth_method = method.replacen("vlx_", "eth_", 1);
+                map.insert(eth_method, method);
+            }
+            map
+        };
+    }
+
+    pub fn methods() -> Vec<String> {
+        MockImpl
+            .to_delegate()
+            .into_iter()
+            .map(|(method, _)| method)
+            .collect()
+    }
+    struct MockImpl;
+    impl ChainIDERPC for MockImpl {
+        type Metadata = ();
+        fn balance(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _address: evm_state::Address,
+            _block: Option<evm_rpc::BlockId>,
+        ) -> jsonrpc_core::BoxFuture<Result<evm_state::U256, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn block_by_hash(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _block_hash: evm_state::H256,
+            _full: bool,
+        ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCBlock>, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn block_by_number(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _block: evm_rpc::BlockId,
+            _full: bool,
+        ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCBlock>, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn block_number(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+        ) -> jsonrpc_core::BoxFuture<Result<evm_rpc::Hex<usize>, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn block_transaction_count_by_hash(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _block_hash: evm_state::H256,
+        ) -> jsonrpc_core::BoxFuture<Result<evm_rpc::Hex<usize>, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn block_transaction_count_by_number(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _block: evm_rpc::BlockId,
+        ) -> jsonrpc_core::BoxFuture<Result<evm_rpc::Hex<usize>, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn call(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _tx: evm_rpc::RPCTransaction,
+            _block: Option<evm_rpc::BlockId>,
+            _meta_keys: Option<Vec<String>>,
+        ) -> jsonrpc_core::BoxFuture<Result<evm_rpc::Bytes, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn code(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _address: evm_state::Address,
+            _block: Option<evm_rpc::BlockId>,
+        ) -> jsonrpc_core::BoxFuture<Result<evm_rpc::Bytes, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn estimate_gas(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _tx: evm_rpc::RPCTransaction,
+            _block: Option<evm_rpc::BlockId>,
+            _meta_keys: Option<Vec<String>>,
+        ) -> jsonrpc_core::BoxFuture<Result<evm_state::Gas, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn logs(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _log_filter: evm_rpc::RPCLogFilter,
+        ) -> jsonrpc_core::BoxFuture<Result<Vec<evm_rpc::RPCLog>, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn storage_at(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _address: evm_state::Address,
+            _data: evm_state::U256,
+            _block: Option<evm_rpc::BlockId>,
+        ) -> jsonrpc_core::BoxFuture<Result<evm_state::H256, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn transaction_by_block_hash_and_index(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _block_hash: evm_state::H256,
+            _tx_id: evm_rpc::Hex<usize>,
+        ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCTransaction>, evm_rpc::Error>>
+        {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn transaction_by_block_number_and_index(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _block: evm_rpc::BlockId,
+            _tx_id: evm_rpc::Hex<usize>,
+        ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCTransaction>, evm_rpc::Error>>
+        {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn transaction_by_hash(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _tx_hash: evm_state::H256,
+        ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCTransaction>, evm_rpc::Error>>
+        {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn transaction_count(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _address: evm_state::Address,
+            _block: Option<evm_rpc::BlockId>,
+        ) -> jsonrpc_core::BoxFuture<Result<evm_state::U256, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
+        fn transaction_receipt(
+            &self,
+            _meta: Self::Metadata,
+            _chain_id: evm_rpc::ChainID,
+            _tx_hash: evm_state::H256,
+        ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCReceipt>, evm_rpc::Error>> {
+            Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
+        }
     }
 }

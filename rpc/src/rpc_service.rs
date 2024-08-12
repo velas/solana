@@ -13,6 +13,7 @@ use {
         rpc_health::*,
     },
     crossbeam_channel::unbounded,
+    evm_rpc::{chain_id_rpc::ChainIDERPC, ChainERPC, GeneralERPC, TraceERPC},
     jsonrpc_core::{futures::prelude::*, MetaIoHandler},
     jsonrpc_http_server::{
         hyper, AccessControlAllowOrigin, CloseHandle, DomainsValidation, RequestMiddleware,
@@ -51,10 +52,8 @@ use {
         thread::{self, Builder, JoinHandle},
     },
     tokio_util::codec::{BytesCodec, FramedRead},
+    tracing_subscriber::{filter::LevelFilter, prelude::*, EnvFilter},
 };
-
-use evm_rpc::{ChainERPC, GeneralERPC, TraceERPC};
-use tracing_subscriber::{filter::LevelFilter, prelude::*, EnvFilter};
 
 const FULL_SNAPSHOT_REQUEST_PATH: &str = "/snapshot.tar.bz2";
 const INCREMENTAL_SNAPSHOT_REQUEST_PATH: &str = "/incremental-snapshot.tar.bz2";
@@ -511,6 +510,7 @@ impl JsonRpcService {
                 }
 
                 io.extend_with(super::evm_rpc_impl::ChainErpcImpl.to_delegate());
+                io.extend_with(super::evm_rpc_impl::ChainIDErpcImpl.to_delegate());
                 io.extend_with(super::evm_rpc_impl::GeneralErpcImpl.to_delegate());
                 io.extend_with(super::evm_rpc_impl::TraceErpcImpl.to_delegate());
 
