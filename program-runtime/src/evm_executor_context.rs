@@ -1,19 +1,21 @@
-use std::{cell::RefCell, fmt, marker::PhantomData, ops::Deref, rc::Rc};
-
-use dashmap::{
-    mapref::one::{MappedRef, MappedRefMut, Ref, RefMut},
-    DashMap,
+use {
+    dashmap::{
+        mapref::one::{MappedRef, MappedRefMut, Ref, RefMut},
+        DashMap,
+    },
+    evm_state::{AccountProvider, EvmBackend, Executor},
+    log::{debug, warn},
+    serde::{
+        de::{SeqAccess, Visitor},
+        ser::SerializeTuple as _,
+        Deserialize, Deserializer, Serialize, Serializer,
+    },
+    solana_sdk::clock::Slot,
+    std::{
+        cell::RefCell, collections::HashMap, fmt, marker::PhantomData, ops::Deref, rc::Rc,
+        sync::RwLock,
+    },
 };
-use serde::{
-    de::{SeqAccess, Visitor},
-    ser::SerializeTuple as _,
-    Deserialize, Deserializer, Serialize, Serializer,
-};
-use solana_sdk::clock::Slot;
-use std::{collections::HashMap, sync::RwLock};
-
-use evm_state::{AccountProvider, EvmBackend, Executor};
-use log::{debug, warn};
 // use solana_program_runtime::evm_executor_context::{BlockHashEvm, MAX_EVM_BLOCKHASHES};
 // use solana_runtime::{bank::log_enabled, message_processor::ProcessedMessageInfo};
 
@@ -123,6 +125,8 @@ impl EvmChain {
         }
     }
 }
+
+
 //TODO: do we need clone?
 impl Clone for EvmChain {
     fn clone(&self) -> Self {
@@ -245,22 +249,6 @@ impl EvmBank {
                 .collect(),
         }
     }
-    pub fn from_parent(
-        evm_chain_id: ChainID,
-        evm_blockhashes: BlockHashEvm,
-        evm_state: evm_state::EvmState,
-        side_chains: DashMap<ChainID, EvmChain>,
-    ) -> Self {
-        Self {
-            main_chain: MainChain {
-                chain_id: evm_chain_id,
-                evm_blockhashes: RwLock::new(evm_blockhashes),
-                evm_state: RwLock::new(evm_state),
-                evm_changed_list: RwLock::new(None),
-            },
-            side_chains,
-        }
-    }
 
     pub fn kvs(&self) -> evm_state::Storage {
         self.main_chain.state().kvs().clone()
@@ -373,6 +361,11 @@ pub enum EvmExecutorContextType {
 pub enum PatchStrategy {
     ApplyFailed,
     SetNew,
+}
+impl PatchStrategy {
+    pub fn success(&self, new_error_handling: bool) -> bool {
+        new_error_handling && matches!(self, PatchStrategy::SetNew)
+    }
 }
 
 type Chain = Option<ChainID>;
@@ -551,10 +544,7 @@ impl EvmExecutorContext {
         params: &ChainParam,
     ) -> Option<evm_state::EvmBackend<evm_state::Incomming>> {
         match params {
-            ChainParam::GetSubchain {
-                chain_id,
-                subchain_hashes,
-            } => {
+            ChainParam::GetSubchain { chain_id, .. } => {
                 let subchain_state = self
                     .evm
                     .side_chains
@@ -613,12 +603,12 @@ impl EvmExecutorContext {
 
     pub fn cleanup(&mut self, strategy: PatchStrategy) {
         let (chain_id, executor): (_, Executor) = {
-            let Some((chain_id, executor)) = self
-                .active_executor
-                .take() else {
-                    log::error!("Executor was not created, on cleanup.");
-                    return;
-                };
+            let Some((chain_id, executor)) = self.active_executor.take() else {
+                if strategy.success(self.evm_new_error_handling) {
+                    log::error!("Executor was not created, on cleanup, but execution success.");
+                }
+                return;
+            };
             (
                 chain_id,
                 Rc::try_unwrap(executor)
@@ -727,9 +717,7 @@ impl<'a> StateExt<'a> for &'a EvmChain {
 }
 #[cfg(test)]
 mod tests {
-    use evm_state::H256;
-
-    use super::*;
+    use {super::*, evm_state::H256};
 
     #[test]
     fn test_evm_blockhaheshes() {

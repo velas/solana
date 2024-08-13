@@ -91,14 +91,17 @@ impl Bank {
         // TODO: cleanup default?
         for mut chain in self.evm.side_chains().iter_mut() {
             let subchain_old_root = chain.evm_state.last_root();
-            let Some((new_root, changes)) = chain.value_mut()
+            let Some((_block_hash, changes)) = chain
+                .value_mut()
                 .evm_state
+                //TODO: apply block_hash on subchain
                 .try_commit(self.slot(), last_blockhash)
-                .expect("failed to commit evm") else {
-                    // nothing to do
-                    continue;
-                };
-            chain.evm_changed_list = Some((old_root, changes));
+                .expect("failed to commit evm")
+            else {
+                // nothing to do
+                continue;
+            };
+            chain.evm_changed_list = Some((subchain_old_root, changes));
         }
 
         measure.stop();
@@ -118,6 +121,11 @@ impl Bank {
 
             let subchain_roots = self.evm.subchain_roots();
 
+            crate::bank::evm::debug_evm_roots(
+                self.evm.main_chain().state().kvs().clone(),
+                self.evm.main_chain().state().last_root(),
+                &subchain_roots,
+            );
             // TODO: feature_subchain
             self.evm
                 .main_chain()
@@ -229,25 +237,41 @@ impl VelasEVM {
     }
 }
 
+pub fn debug_evm_roots(
+    storage: evm_state::Storage,
+    main: evm_state::H256,
+    subchain_roots: &[evm_state::H256],
+) {
+    log::warn!(
+        "EVM_root_count: main {} = {}",
+        main,
+        storage.gc_count(main).unwrap()
+    );
+
+    for subchain_root in subchain_roots {
+        log::warn!(
+            "EVM_root_count: Subchain {subchain_root} = {}",
+            storage.gc_count(*subchain_root).unwrap()
+        );
+    }
+}
+
 #[cfg(test)]
 mod evmtests {
 
-    use crate::bank::Bank;
-    use solana_evm_loader_program::scope::evm::lamports_to_gwei;
-    use solana_program_runtime::evm_executor_context::StateExt;
-    use solana_sdk::native_token::LAMPORTS_PER_VLX;
     pub use solana_sdk::reward_type::RewardType;
-
-    use evm_state::{AccountProvider, EvmState, TEST_CHAIN_ID};
     use {
-        evm_state::FromKey,
+        crate::bank::Bank,
+        evm_state::{AccountProvider, EvmState, FromKey, TEST_CHAIN_ID},
         log::*,
-        solana_program_runtime::timings::ExecuteTimings,
+        solana_evm_loader_program::scope::evm::lamports_to_gwei,
+        solana_program_runtime::{evm_executor_context::StateExt, timings::ExecuteTimings},
         solana_sdk::{
             account::ReadableAccount,
             clock::MAX_PROCESSING_AGE,
             feature_set,
             hash::Hash,
+            native_token::LAMPORTS_PER_VLX,
             pubkey::Pubkey,
             transaction::{Transaction, TransactionError},
         },
@@ -951,6 +975,7 @@ mod evmtests {
         bank.activate_feature(&feature_set::velas::evm_instruction_borsh_serialization::id());
         let recent_hash = genesis_config.hash();
 
+        let hash_before = bank.evm.chain_state(TEST_CHAIN_ID + 1).state().last_root();
         let tx = create_subchain_with_preseed(
             &mint_keypair,
             receiver,
@@ -980,22 +1005,29 @@ mod evmtests {
             .unwrap_or_default();
         assert_eq!(state.balance, 0.into());
 
-        todo!()
+        let hash_after = bank.evm.chain_state(TEST_CHAIN_ID + 1).state().last_root();
         // hash updated with nonce increasing
-        // assert_ne!(hash_before, hash_after);
+        // state is not changed, but blockhash is changed.
+        assert_eq!(hash_before, hash_after);
     }
 
+    #[test]
+    fn send_evm_subchain_tx() {
+        // Add check that after creating, and sending tx subchain evm_state is changed but it last_root is not.
+        todo!();
+    }
     #[test]
     fn create_evm_subchain_regular() {
         solana_logger::setup_with("trace");
         let tx = solana_evm_loader_program::processor::dummy_call(0).0;
         let receiver = tx.caller().unwrap();
-        let (genesis_config, mint_keypair) = create_genesis_config(LAMPORTS_PER_VLX * 1_000_000);
+        let (genesis_config, mint_keypair) = create_genesis_config(LAMPORTS_PER_VLX * 1_000_001);
         let mut bank = Bank::new_for_tests(&genesis_config);
 
         bank.activate_feature(&feature_set::velas::native_swap_in_evm_history::id());
         bank.activate_feature(&feature_set::velas::evm_new_error_handling::id());
         bank.activate_feature(&feature_set::velas::evm_instruction_borsh_serialization::id());
+        let bank = Arc::new(bank);
         let recent_hash = genesis_config.hash();
 
         let tx = create_subchain_with_preseed(
@@ -1005,9 +1037,9 @@ mod evmtests {
             recent_hash,
             20000,
         );
-        let res = bank.process_transaction(&tx).unwrap();
+        let _res = bank.process_transaction(&tx).unwrap();
 
-        let hash_before = bank.evm.main_chain().state().last_root();
+        let hash_before = bank.evm.chain_state(TEST_CHAIN_ID + 1).state().last_root();
 
         let state = match *bank.evm.chain_state(TEST_CHAIN_ID + 1).state() {
             EvmState::Incomming(ref i) => i.get_account_state(receiver).unwrap_or_default(),
@@ -1026,15 +1058,22 @@ mod evmtests {
         log::debug!("subchain_evm_state: {:?}", *subchain_evm_state);
         assert_eq!(subchain_evm_state.processed_tx_len(), 1);
         let account = bank.get_account(&mint_keypair.pubkey()).unwrap_or_default();
-        assert_eq!(account.lamports(), 0);
+        assert_eq!(account.lamports(), LAMPORTS_PER_VLX * 1);
 
         let state = subchain_evm_state
             .get_account_state(receiver)
             .unwrap_or_default();
         assert_eq!(state.balance, lamports_to_gwei(20000));
 
-        todo!()
+        let hash_after = bank.evm.chain_state(TEST_CHAIN_ID + 1).state().last_root();
         // hash updated with nonce increasing
-        // assert_ne!(hash_before, hash_after);
+        assert_ne!(hash_before, hash_after);
+
+        // check that bank can be created from parent
+        let bank2 = Bank::new_from_parent(&bank, &solana_sdk::pubkey::new_rand(), 1);
+        bank2.freeze();
+        let new_hash = bank2.evm.chain_state(TEST_CHAIN_ID + 1).state().last_root();
+
+        assert_eq!(new_hash, hash_after);
     }
 }

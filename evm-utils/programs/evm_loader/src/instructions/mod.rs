@@ -206,12 +206,16 @@ pub enum Hardfork {
 )]
 pub struct SubchainConfig {
     pub hardfork: Hardfork,
-    pub mint: Vec<(Address, u64)>, // lamports
+    pub network_name: String,
+    pub token_name: String,
+    pub mint: Vec<(Address, u64)>,
 }
 impl Default for SubchainConfig {
     fn default() -> Self {
         Self {
             hardfork: Hardfork::Istanbul,
+            network_name: String::new(),
+            token_name: String::new(),
             mint: vec![],
         }
     }

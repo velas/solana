@@ -599,8 +599,6 @@ pub fn test_process_blockstore(
             None,
             &opts,
             None,
-            None,
-            None,
             false,
             None,
             None,

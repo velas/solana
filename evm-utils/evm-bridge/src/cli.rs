@@ -1,4 +1,5 @@
 use {
+    crate::ChainID,
     clap::ValueHint,
     log::{info, warn},
     primitive_types::U256,
@@ -57,6 +58,10 @@ pub struct BridgeCli {
     /// Maximum number of seconds to process batched jsonrpc requests
     #[arg(long, value_parser = parse_seconds_duration, value_name = "SECONDS")]
     pub rpc_max_batch_time: Option<Duration>,
+
+    /// Activate bridge in subchain mode. Only redirect methods to subchain methods.
+    #[arg(long)]
+    pub subchain: bool,
 }
 
 fn default_native_keypair() -> String {

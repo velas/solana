@@ -636,9 +636,20 @@ impl Storage<OptimisticTransactionDB> {
         Ok(removed_roots)
     }
 
-    pub fn cleanup_slots(&self, keep_slot: u64, keep_root: H256) -> Result<()> {
+    pub fn cleanup_slots(
+        &self,
+        keep_slot: u64,
+        keep_root: H256,
+        subchain_roots: Vec<H256>,
+    ) -> Result<()> {
         if !self.check_root_exist(keep_root) {
             return Err(Error::RootNotFound(keep_root));
+        }
+
+        for root in &subchain_roots {
+            if !self.check_root_exist(*root) {
+                return Err(Error::RootNotFound(*root));
+            }
         }
 
         let slots_cf = self.cf::<SlotsRoots>();
@@ -723,6 +734,7 @@ impl Storage<OptimisticTransactionDB> {
         }
 
         let retry = || -> Result<_> {
+            log::info!("Doing retry operation for slot:{} root:{}", slot, root);
             let mut tx = self.db().transaction();
             tx.put_cf(slots_cf, slot.to_be_bytes(), root.as_ref())?;
             trie.db.increase(&mut tx, root)?;
@@ -760,17 +772,16 @@ impl Storage<OptimisticTransactionDB> {
         }
         ops.reverse();
 
-        for retry_count in 0..NUM_RETRY {
+        for retry_count in 1..=NUM_RETRY {
             let Some(op) = ops.pop() else {
                 // everything done
                 break;
             };
-            let result = op();
-            match result {
-                Err(e) if retry_count == NUM_RETRY - 1 => return Err(e),
+            match op() {
+                Err(e) if retry_count == NUM_RETRY => return Err(e),
                 Err(e) => log::trace!(
                     "Error during transaction execution retry_count:{} reason:{}",
-                    retry_count + 1,
+                    retry_count,
                     e
                 ),
                 Ok(_) => continue, // this op is done, but maybe we have more
@@ -1318,7 +1329,10 @@ pub fn copy_and_purge(
         // Root should be decreased, because it has no parent for now, and outer caller will increase it's count.
         for destination in destinations {
             let trie = destination.rocksdb_trie_handle();
-            trie.db.decrease_atomic(*root)?;
+            if *root != empty_trie_hash() {
+                // empty is skipped during traverse
+                trie.db.decrease_atomic(*root)?;
+            }
         }
     }
     Ok(())

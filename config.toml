@@ -1,0 +1,10 @@
+network_name = "Test"
+token_name = "VLD"
+chain_id = 1221
+hardfork = "Istanbul"
+token_symbol = "@"
+rpc_url = "localhost:8899"
+
+[minting_addresses]
+address = ["0x0000000000000000000000000000000000000000"]
+balance = [231]
