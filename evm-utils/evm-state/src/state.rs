@@ -1,3 +1,4 @@
+pub use triedb::empty_trie_hash;
 use {
     crate::{
         storage::{Codes, Storage as KVS},
@@ -16,8 +17,6 @@ use {
         sync::Arc,
     },
 };
-
-pub use triedb::empty_trie_hash;
 pub const DEFAULT_GAS_LIMIT: u64 = 300_000_000;
 
 pub const BURN_GAS_PRICE: u64 = 2_000_000_000; // 2 lamports per gas.
@@ -99,7 +98,8 @@ impl Incomming {
         new
     }
 
-    fn is_active_changes(&self) -> bool {
+    #[doc(hidden)]
+    pub fn is_active_changes(&self) -> bool {
         !(self.state_updates.is_empty()
             && self.executed_transactions.is_empty()
             && self.used_gas == 0)
@@ -331,7 +331,8 @@ impl EvmBackend<Incomming> {
         Ok(self.get_storage_from_kvs(root, address, index))
     }
 
-    fn take(&mut self) -> Self {
+    #[doc(hidden)]
+    pub fn take(&mut self) -> Self {
         Self {
             kvs: self.kvs.clone(),
             state: self.state.take(),

@@ -22,7 +22,6 @@ use {
     },
     solana_sdk::{
         account::{AccountSharedData, ReadableAccount, WritableAccount},
-        borsh::{get_instance_packed_len, get_packed_len},
         instruction::InstructionError,
         keyed_account::KeyedAccount,
         native_token::LAMPORTS_PER_VLX,
@@ -157,6 +156,9 @@ impl EvmProcessor {
         let borsh_serialization_enabled = invoke_context
             .feature_set
             .is_active(&solana_sdk::feature_set::velas::evm_instruction_borsh_serialization::id());
+        let subchain_feature = invoke_context
+            .feature_set
+            .is_active(&solana_sdk::feature_set::velas::evm_subchain::id());
 
         let cross_execution = invoke_context.get_stack_height() != 1;
 
@@ -175,7 +177,7 @@ impl EvmProcessor {
             _ => limited_deserialize(data)?,
         };
         let result = match &ix {
-            EvmInstruction::EvmSubchain(_) => {
+            EvmInstruction::EvmSubchain(_) if subchain_feature => {
                 self.process_subchain_instruction(invoke_context, first_keyed_account, ix)
             }
             _ => {
@@ -306,6 +308,9 @@ impl EvmProcessor {
     ) -> Result<(), EvmError> {
         let is_big = tx.is_big();
         let keep_old_errors = true;
+        let subchain_feature = invoke_context
+            .feature_set
+            .is_active(&solana_sdk::feature_set::velas::evm_subchain::id());
 
         // Calculate index of sender and fee collector account,
         // they should appear after storage and subchain_evm_state.
@@ -339,6 +344,66 @@ impl EvmProcessor {
             }
         }
 
+        fn assert_gas_price(
+            invoke_context: &InvokeContext,
+            executor: &Executor,
+            subchain_feature: bool,
+            fee_type: &FeePayerType,
+            fee_payer: &KeyedAccount,
+            tx_gas_price: U256,
+            tx_gas_limit: U256,
+            subchain: bool,
+        ) -> Result<(), EvmError> {
+            // - work only if feature enabled,
+            // - on subchains or native fee payer
+            if subchain_feature && (fee_type.is_native() || subchain) {
+                let (max_fee, min_lamports) = if subchain {
+                    (
+                        executor.config().burn_gas_price.into(),
+                        SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX,
+                    )
+                } else {
+                    (tx_gas_price, 0)
+                };
+                let max_fee = max_fee * tx_gas_limit;
+                let max_fee_in_lamports = gweis_to_lamports(max_fee);
+                let Some(amount) = fee_payer
+                    .account
+                    .borrow()
+                    .lamports()
+                    .checked_sub(min_lamports)
+                else {
+                    ic_msg!(
+                        invoke_context,
+                        "Fee payer don't have min_deposit {}",
+                        min_lamports
+                    );
+                    return Err(EvmError::NativeAccountInsufficientFunds);
+                };
+                if amount < max_fee_in_lamports.0 {
+                    if subchain {
+                        ic_msg!(invoke_context, "Fee payer has not enough lamports to pay fee, max_fee:{}, min_deposit:{}, amount:{},", max_fee_in_lamports.0, min_lamports, amount);
+                    } else {
+                        ic_msg!(
+                            invoke_context,
+                            "Fee payer has not enough lamports to pay fee, max_fee:{}, amount:{},",
+                            max_fee_in_lamports.0,
+                            amount
+                        );
+                    }
+                    return Err(EvmError::NativeAccountInsufficientFunds);
+                }
+            }
+            Ok(())
+        }
+
+        let native_fee_payer = if subchain {
+            accounts.users.first().ok_or(EvmError::MissingAccount)?
+        } else {
+            // error is copied from old implementation in handle_transaction_result
+            sender.as_ref().ok_or(EvmError::MissingRequiredSignature)?
+        };
+
         let withdraw_fee_from_evm = fee_type.is_evm();
         let mut tx_gas_price;
         let result = match tx {
@@ -355,6 +420,17 @@ impl EvmProcessor {
                     tx.value,
                     tx.action
                 );
+                assert_gas_price(
+                    invoke_context,
+                    &executor,
+                    subchain_feature,
+                    &fee_type,
+                    native_fee_payer,
+                    tx.gas_price,
+                    tx.gas_limit,
+                    subchain,
+                )?;
+
                 tx_gas_price = tx.gas_price;
                 let activate_precompile = precompile_set(
                     executor.support_precompile(),
@@ -365,6 +441,7 @@ impl EvmProcessor {
                 executor.transaction_execute(
                     tx,
                     withdraw_fee_from_evm,
+                    subchain, // allow zero fee
                     precompiles::entrypoint(accounts, activate_precompile, keep_old_errors),
                 )
             }
@@ -394,6 +471,17 @@ impl EvmProcessor {
                     tx.value,
                     tx.action
                 );
+
+                assert_gas_price(
+                    invoke_context,
+                    &executor,
+                    subchain_feature,
+                    &fee_type,
+                    native_fee_payer,
+                    tx.gas_price,
+                    tx.gas_limit,
+                    subchain,
+                )?;
                 tx_gas_price = tx.gas_price;
                 let activate_precompile = precompile_set(
                     executor.support_precompile(),
@@ -405,6 +493,7 @@ impl EvmProcessor {
                     from,
                     tx,
                     withdraw_fee_from_evm,
+                    subchain, // allow zero fee
                     precompiles::entrypoint(accounts, activate_precompile, keep_old_errors),
                 )
             }
@@ -422,16 +511,27 @@ impl EvmProcessor {
         {
             tx_gas_price = executor.config().burn_gas_price;
         }
-        self.handle_transaction_result(
-            executor,
-            invoke_context,
-            accounts,
-            sender,
-            tx_gas_price,
-            result,
-            withdraw_fee_from_evm,
-            subchain,
-        )
+
+        if subchain {
+            self.handle_subchain_transaction_result(
+                executor,
+                invoke_context,
+                accounts,
+                native_fee_payer,
+                tx_gas_price,
+                result,
+            )
+        } else {
+            self.handle_transaction_result(
+                executor,
+                invoke_context,
+                accounts,
+                sender,
+                tx_gas_price,
+                result,
+                withdraw_fee_from_evm,
+            )
+        }
     }
 
     fn process_free_ownership(
@@ -742,6 +842,65 @@ impl EvmProcessor {
         Ok(())
     }
 
+    pub fn handle_subchain_transaction_result(
+        &self,
+        executor: &mut Executor,
+        invoke_context: &InvokeContext,
+        accounts: AccountStructure,
+        fee_payer: &KeyedAccount,
+        tx_gas_price: evm_state::U256,
+        result: Result<evm_state::ExecutionResult, evm_state::error::Error>,
+    ) -> Result<(), EvmError> {
+        let result = result.map_err(|e| {
+            ic_msg!(invoke_context, "Transaction execution error: {}", e);
+            EvmError::InternalExecutorError
+        })?;
+
+        write!(
+            crate::solana_extension::MultilineLogger::new(invoke_context.get_log_collector()),
+            "{}",
+            result
+        )
+        .expect("no error during writes");
+        if matches!(
+            result.exit_reason,
+            ExitReason::Fatal(_) | ExitReason::Error(_)
+        ) {
+            return Err(EvmError::InternalTransactionError);
+        }
+        // Fee refund will not work with revert, because transaction will be reverted from native chain too.
+        if let ExitReason::Revert(_) = result.exit_reason {
+            return Err(EvmError::RevertTransaction);
+        }
+
+        let full_fee = tx_gas_price * result.used_gas;
+
+        let burn_fee = executor.config().burn_gas_price * result.used_gas;
+
+        let charge_from_native = burn_fee;
+        let return_to_zero_addr = full_fee;
+        ic_msg!(
+                invoke_context,
+                "Transaction executed with fee: in vlx {charge_from_native}, in subchain currency {return_to_zero_addr}",
+        );
+        // on subchain logic is different,
+        // Burn_fee is charged from the deposit address, and full_fee is burned in evm_account.
+
+        // 1. Fee can be charged from evm account or native. (evm part is done in Executor::transaction_execute* methods.)
+        Self::charge_native_account(&result, charge_from_native, fee_payer, accounts.evm)?;
+
+        // 2. Then we should burn some part of it.
+        // This if only register burn to the deposit address, withdrawal is done in 1.
+        if return_to_zero_addr > U256::zero() {
+            trace!("Burning fee {}", return_to_zero_addr);
+            // we already withdraw gas_price during transaction_execute,
+            // if burn_fixed_fee is activated, we should deposit to burn addr (0x00..00)
+            executor.deposit(BURN_ADDR, return_to_zero_addr);
+        };
+
+        // if subchain - skip all logic related to fee refund and native swap.
+        return Ok(());
+    }
     // Handle executor errors.
     // refund fee
     pub fn handle_transaction_result(
@@ -753,10 +912,9 @@ impl EvmProcessor {
         tx_gas_price: evm_state::U256,
         result: Result<evm_state::ExecutionResult, evm_state::error::Error>,
         withdraw_fee_from_evm: bool,
-        subchain: bool,
     ) -> Result<(), EvmError> {
         let remove_native_logs_after_swap = true;
-        let mut result = result.map_err(|e| {
+        let result = result.map_err(|e| {
             ic_msg!(invoke_context, "Transaction execution error: {}", e);
             EvmError::InternalExecutorError
         })?;
@@ -765,7 +923,7 @@ impl EvmProcessor {
         if remove_native_logs_after_swap {
             executor.modify_tx_logs(result.tx_id, |logs| {
                 if let Some(logs) = logs {
-                    precompiles::filter_native_logs(accounts, logs).map_err(|e| {
+                    precompiles::post_handle_logs(accounts, logs).map_err(|e| {
                         ic_msg!(invoke_context, "Filter native logs error: {}", e);
                         EvmError::PrecompileError
                     })?;
@@ -774,12 +932,6 @@ impl EvmProcessor {
                     return Err(EvmError::PrecompileError);
                 }
                 Ok(())
-            })?;
-        } else {
-            // same logic, but don't save result to block
-            precompiles::filter_native_logs(accounts, &mut result.tx_logs).map_err(|e| {
-                ic_msg!(invoke_context, "Filter native logs error: {}", e);
-                EvmError::PrecompileError
             })?;
         }
 
@@ -800,15 +952,6 @@ impl EvmProcessor {
             return Err(EvmError::RevertTransaction);
         }
 
-        // if subchain - skip all logic related to fee refund and native swap.
-        if subchain {
-            ic_msg!(
-                invoke_context,
-                "Subchain transaction executed successfully, skipping fee refund and native swap.",
-            );
-            return Ok(());
-        }
-
         let full_fee = tx_gas_price * result.used_gas;
 
         let burn_fee = executor.config().burn_gas_price * result.used_gas;
@@ -821,26 +964,28 @@ impl EvmProcessor {
             );
             return Err(EvmError::OverflowInRefund);
         }
-
         // refund only remaining part
         let refund_fee = full_fee - burn_fee;
+
+        let charge_from_native = full_fee;
+        let return_to_zero_addr = burn_fee;
+
         let (refund_native_fee, _) = gweis_to_lamports(refund_fee);
 
         // 1. Fee can be charged from evm account or native. (evm part is done in Executor::transaction_execute* methods.)
         if !withdraw_fee_from_evm {
-            let sender = sender.as_ref().ok_or(EvmError::MissingRequiredSignature)?;
-            Self::charge_native_account(&result, full_fee, sender, accounts.evm)?;
+            let fee_payer = sender.ok_or(EvmError::MissingRequiredSignature)?;
+            Self::charge_native_account(&result, charge_from_native, fee_payer, accounts.evm)?;
         }
 
         // 2. Then we should burn some part of it.
         // This if only register burn to the deposit address, withdrawal is done in 1.
-        if burn_fee > U256::zero() {
-            trace!("Burning fee {}", burn_fee);
+        if return_to_zero_addr > U256::zero() {
+            trace!("Burning fee {}", return_to_zero_addr);
             // we already withdraw gas_price during transaction_execute,
             // if burn_fixed_fee is activated, we should deposit to burn addr (0x00..00)
-            executor.deposit(BURN_ADDR, burn_fee);
+            executor.deposit(BURN_ADDR, return_to_zero_addr);
         };
-
         // 3. And transfer back remaining fee to the bridge as refund of native fee that was used to wrap this transaction.
         if let Some(payer) = sender {
             ic_msg!(
@@ -860,6 +1005,26 @@ impl EvmProcessor {
         Ok(())
     }
 
+    // check that chain id is prefixed with 0x56
+    // can be any arbitrary hex value, but should be prefixed with 0x56
+    fn check_prefixed_chain_id(chain_id: u64) -> bool {
+        const PREFIX: u64 = b'V' as u64; // 0x56
+        let prefix_zeros = PREFIX.leading_zeros();
+
+        let num_zeros = chain_id.leading_zeros();
+
+        if num_zeros >= prefix_zeros {
+            return false;
+        }
+
+        // number of bits after prefix
+        let num_bits = prefix_zeros - num_zeros;
+        let prefix = chain_id >> num_bits;
+
+        // check that we found prefix at start, and make sure that we shift our prefix by 1 hex digit.
+        prefix == PREFIX && num_bits % 4 == 0
+    }
+
     fn create_evm_subchain_account(
         &self,
         invoke_context: &mut InvokeContext,
@@ -868,10 +1033,13 @@ impl EvmProcessor {
         config: SubchainConfig,
     ) -> Result<(), EvmError> {
         let main_chain_id = invoke_context.get_main_chain_id();
-        if main_chain_id.is_none() || subchain_id == main_chain_id.unwrap() {
+        if main_chain_id.is_none()
+            || subchain_id == main_chain_id.unwrap()
+            || !Self::check_prefixed_chain_id(subchain_id)
+        {
             ic_msg!(
                 invoke_context,
-                "Subchain ID is equal to main chain ID, this is not allowed."
+                "Subchain ID is equal to main chain ID, or not prefixed with 0x56."
             );
             return Err(EvmError::InvalidSubchainId);
         }
@@ -993,13 +1161,11 @@ impl EvmProcessor {
         // TODO: Drop executor on error?
         // Load pre-seed
 
-        trace!("mint:{:?}", mint_setup);
         for (evm_address, lamports) in &mint_setup {
             let gweis = lamports_to_gwei(*lamports);
             executor.deposit(*evm_address, gweis);
             executor.register_swap_tx_in_evm(H160::zero(), *evm_address, gweis);
         }
-        trace!("executor:{:?}", executor);
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
         // serialize data into account.
         state.save(accounts)
@@ -1014,22 +1180,32 @@ impl EvmProcessor {
     ) -> Result<(), EvmError> {
         let (rc, mut refmut);
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
-        let state = crate::subchain::SubchainState::load(accounts)?;
+        let mut state = crate::subchain::SubchainState::load(accounts)?;
         let last_hashes = Box::new(state.last_hashes().get_hashes().clone());
         let executor = get_executor!(rc, refmut => invoke_context, chain_id, last_hashes);
-        trace!("executor:{:?}", executor);
         // TODO: How to deal with reborrowing?? (we neeed last hashes from account to create executor, but to get it we need to borrow invoke context.)
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
-        self.process_execute_tx(
+        let Some(slot) = invoke_context.get_slot_from_evm_context() else {
+            ic_msg!(invoke_context, "Evm context is empty.");
+            return Err(EvmError::InternalExecutorError);
+        };
+        trace!(
+            "last_block_hash = {:?}",
+            executor.evm_backend.state.last_block_hash
+        );
+        state.update(|blocks| blocks.push(executor.evm_backend.state.last_block_hash, slot));
+
+        let result = self.process_execute_tx(
             executor,
             invoke_context,
             accounts,
             tx,
-            FeePayerType::Native,
+            FeePayerType::Evm,
             true,
             true,
-        )
-        // todo: Update hashes.
+        );
+        state.save(accounts)?;
+        result
     }
 
     /// Ensure that first account is program itself, and it's locked for writes.
@@ -1086,25 +1262,23 @@ mod test {
     use {
         super::*,
         evm_state::{
-            empty_trie_hash,
             transactions::{TransactionAction, TransactionSignature},
-            AccountProvider, AccountState, EvmBackend, ExitReason, ExitSucceed, FromKey, Incomming,
+            AccountProvider, AccountState, ExitReason, ExitSucceed, FromKey,
         },
         hex_literal::hex,
         num_traits::Zero,
         primitive_types::{H160, H256, U256},
         solana_program_runtime::{
             compute_budget::ComputeBudget,
-            evm_executor_context::{self, BlockHashEvm, EvmBank, EvmChain, EvmExecutorContext},
+            evm_executor_context::{self, EvmBank, EvmExecutorContext},
             invoke_context::{BuiltinProgram, InvokeContext},
             timings::ExecuteTimings,
         },
         solana_sdk::{
             account::Account,
-            feature_set::{self, velas::evm_new_error_handling},
-            instruction::{AccountMeta, CompiledInstruction, Instruction},
+            feature_set::{self},
+            instruction::{AccountMeta, Instruction},
             keyed_account::{get_signers, keyed_account_at_index},
-            message::{Message, SanitizedMessage},
             native_loader,
             program_utils::limited_deserialize,
             pubkey::Pubkey,
@@ -1120,10 +1294,8 @@ mod test {
         super::TEST_CHAIN_ID as CHAIN_ID,
         borsh::BorshSerialize,
         std::{
-            cell::RefCell,
-            collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-            rc::Rc,
-            sync::{Arc, RwLock},
+            collections::{BTreeMap, HashMap, HashSet},
+            sync::Arc,
         },
     };
 
@@ -1138,6 +1310,8 @@ mod test {
         evm_program_account: AccountSharedData,
         rest_accounts: BTreeMap<Pubkey, MutableAccount>,
         feature_set: solana_sdk::feature_set::FeatureSet,
+        evm_bank_slot: u64,
+        evm_bank_unix_timestamp: i64,
     }
 
     impl EvmMockContext {
@@ -1164,6 +1338,8 @@ mod test {
                 .into_iter()
                 .collect(),
                 feature_set: solana_sdk::feature_set::FeatureSet::all_enabled(),
+                evm_bank_slot: 10_000,
+                evm_bank_unix_timestamp: 1_000_000,
             }
         }
 
@@ -1188,6 +1364,34 @@ mod test {
 
         fn process_instruction(&mut self, ix: Instruction) -> Result<(), InstructionError> {
             self.process_transaction(vec![ix])
+        }
+
+        fn commit_state(&mut self) {
+            let native_blockhash = H256::from_slice(
+                &solana_sdk::hash::hashv(&[
+                    &self.evm_bank_slot.to_be_bytes(),
+                    &self.evm_bank_unix_timestamp.to_be_bytes(),
+                ])
+                .to_bytes(),
+            );
+            self.evm_bank_slot += 1;
+            self.evm_bank_unix_timestamp += 1000;
+            if self.evm_state.state.is_active_changes() {
+                self.evm_state = self
+                    .evm_state
+                    .take()
+                    .commit_block(self.evm_bank_slot, native_blockhash)
+                    .next_incomming(self.evm_bank_unix_timestamp as u64);
+            }
+
+            for (_, state) in self.subchains.iter_mut() {
+                if state.state.is_active_changes() {
+                    *state = state
+                        .take()
+                        .commit_block(self.evm_bank_slot, native_blockhash)
+                        .next_incomming(self.evm_bank_unix_timestamp as u64);
+                }
+            }
         }
 
         fn deposit_evm(&mut self, evm_addr: evm_state::Address, amount: evm_state::U256) {
@@ -1455,8 +1659,8 @@ mod test {
             let mut evm_executor_context = EvmExecutorContext::new(
                 evm_bank,
                 feature_set,
-                1_000_000,
-                1_000_000,
+                self.evm_bank_unix_timestamp,
+                self.evm_bank_slot,
                 false,
                 is_evm_burn_fee_activated,
                 evm_new_error_handling,
@@ -1503,7 +1707,7 @@ mod test {
                 .unwrap_or(keys.len());
 
             for instruction in ixs {
-                let mut accounts = instruction.accounts.clone();
+                let accounts = instruction.accounts.clone();
 
                 dbg!(&instruction.accounts);
                 // accounts.remove(program_index);
@@ -1539,7 +1743,7 @@ mod test {
                         return Err(e);
                     };
 
-                    if let Some(chain_id) = chain_id {
+                    if let Some(_chain_id) = chain_id {
                         warn!("Skiping update on error on empty subchain.")
                     } else {
                         self.evm_state
@@ -1551,7 +1755,7 @@ mod test {
 
             // invoke context will apply native accounts chages, but evm should be applied manually.
             if let Some((chain_id, executor)) = invoke_context.deconstruct_evm() {
-                let mut evm_state = if let Some(chain_id) = chain_id {
+                let evm_state = if let Some(chain_id) = chain_id {
                     let main = &self.evm_state;
 
                     info!("Updating subchain state {}", chain_id);
@@ -3255,13 +3459,24 @@ mod test {
     }
 
     #[test]
-    fn create_evm_subchain_account() {
+    fn subchain_create() {
         let mut evm_context = EvmMockContext::new(0);
         let user_id = Pubkey::new_unique();
         let user_acc = evm_context.native_account(user_id);
-        let chain_id = 22;
+        let chain_id = 0x561;
         user_acc.set_owner(system_program::ID);
         user_acc.set_lamports(10000000000000000);
+        let err = evm_context
+            .process_instruction(crate::create_evm_subchain_account(
+                user_id,
+                chain_id,
+                SubchainConfig::default(),
+            ))
+            .unwrap_err();
+        assert_eq!(err, InstructionError::Custom(16)); // InstructionNotSupportedYet
+        evm_context
+            .feature_set
+            .activate(&solana_sdk::feature_set::velas::evm_subchain::id(), 0);
         // failed because of invalid chain id
         let err = evm_context
             .process_instruction(crate::create_evm_subchain_account(
@@ -3270,15 +3485,13 @@ mod test {
                 SubchainConfig::default(),
             ))
             .unwrap_err();
+        assert_eq!(err, InstructionError::Custom(24)); // InvalidCustomChainId
 
         let mut config = SubchainConfig::default();
         let evm_address = crate::evm_address_for_program(user_id);
         config.mint.push((evm_address, 10000));
-        evm_context
-            .process_instruction(crate::create_evm_subchain_account(
-                user_id, chain_id, config,
-            ))
-            .unwrap();
+
+        setup_chain(&mut evm_context, user_id, chain_id, config, 0);
 
         let evm_acc = evm_context
             .evm_state
@@ -3286,10 +3499,6 @@ mod test {
             .unwrap_or_default();
         assert_eq!(evm_acc.balance, U256::from(0));
 
-        let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
-        let evm_acc_on_sub = subchain_evm.get_account_state(evm_address).unwrap();
-        assert_eq!(evm_acc_on_sub.balance, lamports_to_gwei(10000));
-        assert_eq!(subchain_evm.get_executed_transactions().len(), 1);
         //TODO: Check account state in native chain.
         // failed because already exist
         let err = evm_context
@@ -3299,10 +3508,12 @@ mod test {
                 SubchainConfig::default(),
             ))
             .unwrap_err();
+
+        assert_eq!(err, InstructionError::Custom(20));
     }
 
     #[test]
-    fn transfer_on_subchain() {
+    fn subchain_transfer() {
         let mut evm_context = EvmMockContext::new(0);
         let user_id = Pubkey::new_unique();
         let user_acc = evm_context.native_account(user_id);
@@ -3316,45 +3527,302 @@ mod test {
         let mut config = SubchainConfig::default();
         config.mint.push((address, 10000));
 
-        let chain_id = 2233;
+        let chain_id = 0x561;
+        setup_chain(&mut evm_context, user_id, chain_id, config, 42000);
+        transfer_on_subchain(
+            &mut evm_context,
+            chain_id,
+            secret_key,
+            to,
+            10.into(),
+            user_id,
+        );
+        assert!(evm_context.evm_state.get_account_state(address).is_none());
+        assert!(evm_context.evm_state.get_account_state(to).is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "Result::unwrap()` on an `Err` value: Custom(18)")] // NativeAccountInsufficientFunds
+    fn subchain_transfer_no_extra_deposit() {
+        let mut evm_context = EvmMockContext::new(0);
+        let user_id = Pubkey::new_unique();
+        let user_acc = evm_context.native_account(user_id);
+        user_acc.set_owner(system_program::ID);
+        user_acc.set_lamports(10000000000000000);
+
+        let secret_key = evm::SecretKey::from_slice(&SECRET_KEY_DUMMY).unwrap();
+        let address = secret_key.to_address();
+
+        let to = crate::evm_address_for_program(user_id);
+        let mut config = SubchainConfig::default();
+        config.mint.push((address, 10000));
+
+        let chain_id = 0x561;
+        setup_chain(&mut evm_context, user_id, chain_id, config, 1);
+        transfer_on_subchain(
+            &mut evm_context,
+            chain_id,
+            secret_key,
+            to,
+            10.into(),
+            user_id,
+        );
+    }
+
+    fn setup_chain(
+        evm_context: &mut EvmMockContext,
+        owner: solana::Address,
+        chain_id: u64,
+        config: SubchainConfig,
+        extra_deposit: u64,
+    ) {
+        evm_context.feature_set.activate(
+            &solana_sdk::feature_set::velas::evm_subchain::id(),
+            evm_context.evm_bank_slot,
+        );
         evm_context
             .process_instruction(crate::create_evm_subchain_account(
-                user_id, chain_id, config,
+                owner,
+                chain_id,
+                config.clone(),
             ))
             .unwrap();
 
+        let subchain_pubkey = crate::evm_state_subchain_account(chain_id);
+        let subchain_state_account = evm_context.native_account(subchain_pubkey);
+        subchain_state_account.set_lamports(subchain_state_account.lamports() + extra_deposit);
+
+        let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
+
+        assert_eq!(
+            subchain_evm.get_executed_transactions().len(),
+            config.mint.len()
+        );
+        for (evm_address, balance) in config.mint {
+            let evm_acc_on_sub = subchain_evm.get_account_state(evm_address).unwrap();
+            assert_eq!(evm_acc_on_sub.balance, lamports_to_gwei(balance));
+        }
+    }
+
+    fn transfer_on_subchain(
+        evm_context: &mut EvmMockContext,
+        chain_id: u64,
+        sender: evm::SecretKey,
+        receiver: evm::Address,
+        amount: U256,
+        bridge: solana::Address,
+    ) -> H256 {
+        let transfer_gas_used = 21000;
+
+        let subchain_pubkey = crate::evm_state_subchain_account(chain_id);
+
+        let subchain_state_account_before = evm_context.native_account_cloned(subchain_pubkey);
+        let mut state_before =
+            crate::subchain::SubchainState::try_from_slice(subchain_state_account_before.data())
+                .expect("Subchain state should be correct");
+
+        assert!(
+            subchain_state_account_before.lamports()
+                > LAMPORTS_PER_VLX * SUBCHAIN_CREATION_DEPOSIT_VLX,
+            "Subchain account should have enough lamports"
+        );
+
+        let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
+        let address = sender.to_address();
+        let from_state_before = subchain_evm
+            .get_account_state(address)
+            .expect("Sender should exist on blockchain");
         let tx_transfer = evm::UnsignedTransaction {
-            nonce: 0u32.into(),
-            gas_price: 2000000000u32.into(),
-            gas_limit: 300000u32.into(),
-            action: TransactionAction::Call(to),
-            value: 10u32.into(),
+            nonce: from_state_before.nonce,
+            gas_price: 10000.into(),
+            gas_limit: transfer_gas_used.into(),
+            action: TransactionAction::Call(receiver),
+            value: amount,
             input: vec![],
         };
-        let tx_transfer = tx_transfer.sign(&secret_key, Some(chain_id));
+        let gas = tx_transfer.gas_price * transfer_gas_used;
+        let total = amount + gas;
+        let tx_transfer = tx_transfer.sign(&sender, Some(chain_id));
 
         let tx_hash = tx_transfer.tx_id_hash();
+        let before = subchain_evm.get_executed_transactions().len();
 
-        assert!(evm_context
+        let to_state_before = subchain_evm.get_account_state(receiver).unwrap_or_default();
+        evm_context
             .process_instruction(crate::send_raw_tx_subchain(
-                user_id,
+                bridge,
                 tx_transfer.clone(),
                 None,
-                chain_id
+                chain_id,
             ))
-            .is_ok());
-
+            .unwrap();
         let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
         assert!(subchain_evm.find_transaction_receipt(tx_hash).is_some());
 
-        assert_eq!(subchain_evm.get_executed_transactions().len(), 2);
+        let after = subchain_evm.get_executed_transactions().len();
+        assert_eq!(after, before + 1);
 
-        let to_state = subchain_evm.get_account_state(to).unwrap();
-        assert_eq!(to_state.balance, 10u32.into());
+        let to_state = subchain_evm.get_account_state(receiver).unwrap();
+        assert_eq!(to_state.balance, to_state_before.balance + amount);
         let from_state = subchain_evm.get_account_state(address).unwrap();
-        assert_eq!(from_state.balance, 9999999999990u64.into());
+        assert_eq!(from_state.balance, from_state_before.balance - total);
 
-        assert!(evm_context.evm_state.get_account_state(address).is_none());
-        assert!(evm_context.evm_state.get_account_state(to).is_none());
+        let subchain_state_account = evm_context.native_account(subchain_pubkey);
+        assert!(
+            subchain_state_account.lamports() >= LAMPORTS_PER_VLX * SUBCHAIN_CREATION_DEPOSIT_VLX
+        );
+
+        let state_after =
+            crate::subchain::SubchainState::try_from_slice(subchain_state_account.data())
+                .expect("Subchain state should be correct");
+
+        state_before.last_hashes = state_after.last_hashes.clone();
+        assert_eq!(state_before, state_after);
+
+        let burn_fee = transfer_gas_used * evm::BURN_GAS_PRICE;
+        let burn_fee = gweis_to_lamports(burn_fee.into()).0;
+        assert_eq!(
+            subchain_state_account_before.lamports() - subchain_state_account.lamports(),
+            burn_fee
+        );
+
+        tx_hash
+    }
+
+    // 1. test that sequence of transactions will set hash after successfull processing tx
+    #[test]
+    fn subchain_finalize() {
+        let mut evm_context = EvmMockContext::new(0);
+        let user_id = Pubkey::new_unique();
+        let user_acc = evm_context.native_account(user_id);
+        user_acc.set_owner(system_program::ID);
+        user_acc.set_lamports(10000000000000000);
+
+        let secret_key = evm::SecretKey::from_slice(&SECRET_KEY_DUMMY).unwrap();
+        let address = secret_key.to_address();
+
+        let to = crate::evm_address_for_program(user_id);
+        let mut config = SubchainConfig::default();
+        config.mint.push((address, 10000));
+
+        let chain_id = 0x561;
+        setup_chain(&mut evm_context, user_id, chain_id, config, 42000 * 3);
+
+        // multiple finalize should not create multiple blocks
+        evm_context.commit_state();
+        evm_context.commit_state();
+
+        let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
+        assert_eq!(subchain_evm.get_executed_transactions().len(), 0);
+        assert_eq!(subchain_evm.block_number(), 1);
+        assert_eq!(evm_context.evm_state.block_number(), 0);
+
+        let subchain_pubkey = crate::evm_state_subchain_account(chain_id);
+        let state = crate::subchain::SubchainState::try_from_slice(
+            evm_context.native_account(subchain_pubkey).data(),
+        )
+        .unwrap();
+
+        assert_eq!(num_non_empty_hashes(state.last_hashes().get_hashes()), 0);
+
+        let _tx_hash = transfer_on_subchain(
+            &mut evm_context,
+            chain_id,
+            secret_key,
+            to,
+            10.into(),
+            user_id,
+        );
+
+        let state = crate::subchain::SubchainState::try_from_slice(
+            evm_context.native_account(subchain_pubkey).data(),
+        )
+        .unwrap();
+
+        assert_eq!(num_non_empty_hashes(state.last_hashes().get_hashes()), 1);
+        // second transfer on same block should not create new blockshash
+        let _tx_hash = transfer_on_subchain(
+            &mut evm_context,
+            chain_id,
+            secret_key,
+            to,
+            10.into(),
+            user_id,
+        );
+
+        let state = crate::subchain::SubchainState::try_from_slice(
+            evm_context.native_account(subchain_pubkey).data(),
+        )
+        .unwrap();
+
+        assert_eq!(num_non_empty_hashes(state.last_hashes().get_hashes()), 1);
+
+        // Finalize can't create new blockshash
+        evm_context.commit_state();
+
+        let state = crate::subchain::SubchainState::try_from_slice(
+            evm_context.native_account(subchain_pubkey).data(),
+        )
+        .unwrap();
+
+        assert_eq!(num_non_empty_hashes(state.last_hashes().get_hashes()), 1);
+        // but new transaction will
+        let _tx_hash = transfer_on_subchain(
+            &mut evm_context,
+            chain_id,
+            secret_key,
+            to,
+            10.into(),
+            user_id,
+        );
+        let state = crate::subchain::SubchainState::try_from_slice(
+            evm_context.native_account(subchain_pubkey).data(),
+        )
+        .unwrap();
+
+        assert_eq!(num_non_empty_hashes(state.last_hashes().get_hashes()), 2);
+    }
+
+    fn num_non_empty_hashes(hashes: &[H256]) -> usize {
+        hashes.iter().filter(|h| !h.is_zero()).count()
+    }
+
+    #[test]
+    fn test_prefixes_checker() {
+        assert!(EvmProcessor::check_prefixed_chain_id(0x561));
+        assert!(EvmProcessor::check_prefixed_chain_id(0x56f));
+        assert!(EvmProcessor::check_prefixed_chain_id(0x562));
+        assert!(EvmProcessor::check_prefixed_chain_id(0x5623));
+        assert!(EvmProcessor::check_prefixed_chain_id(0x56235));
+        assert!(EvmProcessor::check_prefixed_chain_id(0x562356));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x1562356));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x156235));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x15623));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x1562));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x156));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x10562));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x1056));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x105));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x1));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x0));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x56));
+
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x53));
+
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x5f));
+
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x50));
+
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x50));
+
+        assert!(!EvmProcessor::check_prefixed_chain_id(0x100));
+        assert!(!EvmProcessor::check_prefixed_chain_id(0xAC00000000000000));
+    }
+
+    #[quickcheck_macros::quickcheck]
+    fn qc_prefixes_checker(chain_id: u64) -> bool {
+        let res = EvmProcessor::check_prefixed_chain_id(chain_id);
+        let str_res = format!("{:x}", chain_id);
+        (str_res.starts_with("56") && str_res.len() > 2) == res
     }
 }

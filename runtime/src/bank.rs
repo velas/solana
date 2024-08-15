@@ -1675,12 +1675,6 @@ impl Bank {
 
                 let subchain_roots: Vec<_> = subchains.iter().map(|c| c.1.last_root()).collect();
 
-                crate::bank::evm::debug_evm_roots(
-                    evm_state.kvs().clone(),
-                    evm_state.last_root(),
-                    &subchain_roots,
-                );
-
                 // TODO: feature_subchain
                 evm_state
                     .register_slot(slot, subchain_roots.clone())
@@ -5959,11 +5953,6 @@ impl Bank {
 
         let subchain_roots = self.evm.subchain_roots();
 
-        crate::bank::evm::debug_evm_roots(
-            self.evm.main_chain().state().kvs().clone(),
-            self.evm.main_chain().state().last_root(),
-            &subchain_roots,
-        );
         // TODO: feature_subchain
         self.evm
             .main_chain()
@@ -5971,11 +5960,6 @@ impl Bank {
             .reregister_slot(self.slot(), subchain_roots.clone())
             .expect("cannot register slot");
 
-        crate::bank::evm::debug_evm_roots(
-            self.evm.main_chain().state().kvs().clone(),
-            self.evm.main_chain().state().last_root(),
-            &subchain_roots,
-        );
         self.apply_feature_activations(true, debug_do_not_add_builtins);
 
         if self

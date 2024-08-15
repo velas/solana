@@ -126,7 +126,6 @@ impl EvmChain {
     }
 }
 
-
 //TODO: do we need clone?
 impl Clone for EvmChain {
     fn clone(&self) -> Self {
@@ -458,6 +457,9 @@ impl EvmExecutorContext {
     }
     pub fn get_main_chain_id(&self) -> ChainID {
         self.evm.main_chain().id()
+    }
+    pub fn get_slot(&self) -> u64 {
+        self.bank_slot
     }
 
     pub fn get_executor(&mut self, params: ChainParam) -> Option<Rc<RefCell<Executor>>> {

@@ -258,6 +258,7 @@ impl Executor {
         tx_chain_id: Option<u64>,
         tx_hash: H256,
         withdraw_fee: bool,
+        allow_zero_fee: bool,
         precompiles: OwnedPrecompile,
     ) -> Result<ExecutionResult, Error> {
         let state_account = self
@@ -293,10 +294,12 @@ impl Executor {
             GasPriceOutOfBounds { gas_price }
         );
 
-        if self
+        if allow_zero_fee {
+            // skip check
+        } else if self
             .feature_set
             .is_accept_zero_gas_price_with_native_fee_enabled()
-            && !withdraw_fee
+            && !withdraw_fee // fee_payer = Native
             && gas_price.is_zero()
         {
             gas_price = self.config.burn_gas_price;
@@ -412,6 +415,7 @@ impl Executor {
         caller: H160,
         tx: UnsignedTransaction,
         withdraw_fee: bool,
+        allow_zero_fee: bool,
         precompiles: OwnedPrecompile,
     ) -> Result<ExecutionResult, Error> {
         let chain_id = self.config.chain_id;
@@ -434,6 +438,7 @@ impl Executor {
             Some(chain_id),
             tx_hash,
             withdraw_fee,
+            allow_zero_fee,
             precompiles,
         )?;
 
@@ -445,6 +450,7 @@ impl Executor {
         &mut self,
         evm_tx: Transaction,
         withdraw_fee: bool,
+        allow_zero_fee: bool,
         precompiles: OwnedPrecompile,
     ) -> Result<ExecutionResult, Error> {
         let caller = evm_tx.caller()?; // This method verify signature.
@@ -468,6 +474,7 @@ impl Executor {
             evm_tx.signature.chain_id(),
             tx_hash,
             withdraw_fee,
+            allow_zero_fee,
             precompiles,
         )?;
 
@@ -580,6 +587,12 @@ impl Executor {
         self.with_executor(OwnedPrecompile::default(), |e| {
             e.state_mut().deposit(recipient, amount)
         });
+    }
+    /// Withdraw some tokens from address:
+    pub fn withdraw(&mut self, sender: H160, amount: U256) -> Result<(), ExitError> {
+        self.with_executor(OwnedPrecompile::default(), |e| {
+            e.state_mut().withdraw(sender, amount)
+        })
     }
 
     pub fn register_swap_tx_in_evm(&mut self, mint_address: H160, recipient: H160, amount: U256) {

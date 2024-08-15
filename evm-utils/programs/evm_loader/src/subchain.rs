@@ -7,10 +7,7 @@ use {
         scope::solana,
     },
     borsh::{BorshDeserialize, BorshSchema, BorshSerialize},
-    solana_sdk::{
-        account::ReadableAccount,
-        borsh::{get_instance_packed_len, get_packed_len},
-    },
+    solana_sdk::{account::ReadableAccount, borsh::get_instance_packed_len},
 };
 
 #[derive(

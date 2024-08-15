@@ -1229,6 +1229,7 @@ impl TraceERPC for TraceErpcImpl {
                     Some(tx_chain_id),
                     tx_hash,
                     true,
+                    false, // allow zero fee
                     simulation_entrypoint(
                         PrecompileSet::VelasClassic,
                         &evm_keyed_account,
@@ -1584,6 +1585,7 @@ fn call_inner(
             Some(tx_chain_id),
             tx_hash,
             true,
+            false, // allow zero fee
             simulation_entrypoint(
                 PrecompileSet::VelasClassic,
                 &evm_keyed_account,

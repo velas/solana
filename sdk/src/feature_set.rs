@@ -437,6 +437,10 @@ pub mod velas {
     pub mod clear_logs_on_native_error {
         solana_sdk::declare_id!("BVF8r9JP1is4YworaZsiEk6fCSTiDxvD59Eo9kFyc85F");
     }
+
+    pub mod evm_subchain {
+        solana_sdk::declare_id!("41C1D8Ygws7skDLEDyMBkFeGE2y9kbcKPb733E6gpiu4");
+    }
 }
 
 pub mod allow_votes_to_directly_update_vote_state {

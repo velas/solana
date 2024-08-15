@@ -50,7 +50,7 @@ use {
     },
     scope::*,
     solana_program_runtime::evm_executor_context::ChainID,
-    solana_sdk::{instruction::AccountMeta, pubkey},
+    solana_sdk::instruction::AccountMeta,
 };
 
 pub static ID: solana::Address = solana_sdk::evm_loader::ID;

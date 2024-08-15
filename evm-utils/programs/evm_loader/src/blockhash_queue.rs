@@ -3,9 +3,11 @@
 //!
 //!
 const MAX_BLOCKHASHES: usize = 256;
-use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
-use evm_state::H256 as Hash;
-use solana_sdk::clock::Slot;
+use {
+    borsh::{BorshDeserialize, BorshSchema, BorshSerialize},
+    evm_state::H256 as Hash,
+    solana_sdk::clock::Slot,
+};
 
 #[derive(
     BorshSerialize, BorshDeserialize, BorshSchema, Clone, Debug, PartialEq, Eq, Ord, PartialOrd,
@@ -22,10 +24,14 @@ impl BlockhashQueue {
             last_slot: 0,
         }
     }
-
+    /// Push new hash to blockhashes queue,
+    /// Ignore if the same hash is last in the queue.
     pub fn push(&mut self, new_hash: Hash, slot: Slot) {
         assert!(self.last_slot <= slot);
-
+        // skip saving same hash
+        if self.blockhashes[255] == new_hash {
+            return;
+        }
         // If it is new slot - shift all blockhashes and update last_slot
         if self.last_slot < slot {
             // move all array elements one step forward
@@ -96,6 +102,8 @@ mod tests {
         assert_eq!(blockhash_queue.get_hashes()[255], Hash::repeat_byte(3));
         // Update for same slot
         blockhash_queue.push(Hash::repeat_byte(33), 3 as Slot);
+
+        blockhash_queue.push(Hash::repeat_byte(33), 4 as Slot); // prevent pushing same hash on different slot
         assert_eq!(blockhash_queue.get_hashes()[255 - 3], Hash::repeat_byte(0));
         assert_eq!(blockhash_queue.get_hashes()[255 - 2], Hash::repeat_byte(1));
         assert_eq!(blockhash_queue.get_hashes()[255 - 1], Hash::repeat_byte(2));

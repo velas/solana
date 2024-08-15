@@ -121,11 +121,6 @@ impl Bank {
 
             let subchain_roots = self.evm.subchain_roots();
 
-            crate::bank::evm::debug_evm_roots(
-                self.evm.main_chain().state().kvs().clone(),
-                self.evm.main_chain().state().last_root(),
-                &subchain_roots,
-            );
             // TODO: feature_subchain
             self.evm
                 .main_chain()
