@@ -234,7 +234,7 @@ mod subchain_methods_collector {
         fn balance(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _address: evm_state::Address,
             _block: Option<evm_rpc::BlockId>,
         ) -> jsonrpc_core::BoxFuture<Result<evm_state::U256, evm_rpc::Error>> {
@@ -243,7 +243,7 @@ mod subchain_methods_collector {
         fn block_by_hash(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _block_hash: evm_state::H256,
             _full: bool,
         ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCBlock>, evm_rpc::Error>> {
@@ -252,7 +252,7 @@ mod subchain_methods_collector {
         fn block_by_number(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _block: evm_rpc::BlockId,
             _full: bool,
         ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCBlock>, evm_rpc::Error>> {
@@ -261,14 +261,14 @@ mod subchain_methods_collector {
         fn block_number(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
         ) -> jsonrpc_core::BoxFuture<Result<evm_rpc::Hex<usize>, evm_rpc::Error>> {
             Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
         }
         fn block_transaction_count_by_hash(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _block_hash: evm_state::H256,
         ) -> jsonrpc_core::BoxFuture<Result<evm_rpc::Hex<usize>, evm_rpc::Error>> {
             Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
@@ -276,7 +276,7 @@ mod subchain_methods_collector {
         fn block_transaction_count_by_number(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _block: evm_rpc::BlockId,
         ) -> jsonrpc_core::BoxFuture<Result<evm_rpc::Hex<usize>, evm_rpc::Error>> {
             Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
@@ -284,7 +284,7 @@ mod subchain_methods_collector {
         fn call(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _tx: evm_rpc::RPCTransaction,
             _block: Option<evm_rpc::BlockId>,
             _meta_keys: Option<Vec<String>>,
@@ -294,7 +294,7 @@ mod subchain_methods_collector {
         fn code(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _address: evm_state::Address,
             _block: Option<evm_rpc::BlockId>,
         ) -> jsonrpc_core::BoxFuture<Result<evm_rpc::Bytes, evm_rpc::Error>> {
@@ -303,7 +303,7 @@ mod subchain_methods_collector {
         fn estimate_gas(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _tx: evm_rpc::RPCTransaction,
             _block: Option<evm_rpc::BlockId>,
             _meta_keys: Option<Vec<String>>,
@@ -313,7 +313,7 @@ mod subchain_methods_collector {
         fn logs(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _log_filter: evm_rpc::RPCLogFilter,
         ) -> jsonrpc_core::BoxFuture<Result<Vec<evm_rpc::RPCLog>, evm_rpc::Error>> {
             Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })
@@ -321,7 +321,7 @@ mod subchain_methods_collector {
         fn storage_at(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _address: evm_state::Address,
             _data: evm_state::U256,
             _block: Option<evm_rpc::BlockId>,
@@ -331,7 +331,7 @@ mod subchain_methods_collector {
         fn transaction_by_block_hash_and_index(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _block_hash: evm_state::H256,
             _tx_id: evm_rpc::Hex<usize>,
         ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCTransaction>, evm_rpc::Error>>
@@ -341,7 +341,7 @@ mod subchain_methods_collector {
         fn transaction_by_block_number_and_index(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _block: evm_rpc::BlockId,
             _tx_id: evm_rpc::Hex<usize>,
         ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCTransaction>, evm_rpc::Error>>
@@ -351,7 +351,7 @@ mod subchain_methods_collector {
         fn transaction_by_hash(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _tx_hash: evm_state::H256,
         ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCTransaction>, evm_rpc::Error>>
         {
@@ -360,7 +360,7 @@ mod subchain_methods_collector {
         fn transaction_count(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _address: evm_state::Address,
             _block: Option<evm_rpc::BlockId>,
         ) -> jsonrpc_core::BoxFuture<Result<evm_state::U256, evm_rpc::Error>> {
@@ -369,7 +369,7 @@ mod subchain_methods_collector {
         fn transaction_receipt(
             &self,
             _meta: Self::Metadata,
-            _chain_id: evm_rpc::ChainID,
+            _chain: evm_rpc::EvmChain,
             _tx_hash: evm_state::H256,
         ) -> jsonrpc_core::BoxFuture<Result<Option<evm_rpc::RPCReceipt>, evm_rpc::Error>> {
             Box::pin(async move { Err(evm_rpc::Error::ProxyRequest) })

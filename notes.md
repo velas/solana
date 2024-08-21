@@ -127,11 +127,13 @@ TODO for this week:
 3. last-roots for subchain collecting
 4. + blockhashes for subchain changing 
 5. * feature non activating
-6. SubchainConfig::validate() - check if chain_id in blacklist, not main_chain_id, is prefixed with 0x56, strings are limited by length.
+6. * SubchainConfig::validate() - check if chain_id in blacklist, not main_chain_id, is prefixed with 0x56, strings are limited by length.
 7. + Mixed fee payer model - 
+8. manager - fix inputs for chain_id and mint
 
 tests:
 Todo: Add test for register slot with subchains
 
 1. Min gas_price in config == FOR ALEX
 2. addr bridge in config == FOR ALEX
+3. Reverted transaction processing == FOR ALEX

@@ -367,7 +367,7 @@ impl PatchStrategy {
     }
 }
 
-type Chain = Option<ChainID>;
+pub type Chain = Option<ChainID>;
 //
 // 1. Init state: in solana::Bank::evm -> EvmExecutorContext::new()
 // 2. State for tx_batch = evm_patch::new(init_state)

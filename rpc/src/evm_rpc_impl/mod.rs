@@ -6,7 +6,7 @@ use {
         error::{into_native_error, BlockNotFound, Error, EvmStateError, StateNotFoundForBlock},
         general::GeneralERPC,
         trace::{TraceERPC, TraceMeta},
-        BlockId, BlockRelId, Bytes, ChainID, Either, Hex, RPCBlock, RPCLog, RPCLogFilter,
+        BlockId, BlockRelId, Bytes, ChainID, Either, EvmChain, Hex, RPCBlock, RPCLog, RPCLogFilter,
         RPCReceipt, RPCTopicFilter, RPCTransaction,
     },
     evm_state::{
@@ -103,11 +103,11 @@ impl StateRootWithBank {
 
 #[instrument(skip(meta))]
 async fn block_to_state_root(
-    chain_id: ChainID,
+    chain: Option<ChainID>,
     block: Option<BlockId>,
     meta: &JsonRpcRequestProcessor,
 ) -> Result<StateRootWithBank, Error> {
-    let main_chain = chain_id == meta.get_main_chain_id();
+    let main_chain = chain.is_none();
 
     let block_id = block.unwrap_or_default();
 
@@ -126,13 +126,19 @@ async fn block_to_state_root(
     let block_num = match block_id {
         BlockId::RelativeId(BlockRelId::Pending) | BlockId::RelativeId(BlockRelId::Latest) => {
             let bank = meta.bank(Some(CommitmentConfig::processed()));
-            let (bank, last_root) = if main_chain {
+            let (bank, last_root) = if let Some(chain_id) = chain {
+                if chain_id == meta.get_main_chain_id() {
+                    return Err(Error::WrongChainId {
+                        chain_id: meta.get_main_chain_id(),
+                        tx_chain_id: None,
+                    });
+                }
+                (None, bank.evm().chain_state(chain_id).evm_state.last_root())
+            } else {
                 let evm = bank.evm().main_chain().state();
                 let last_root = evm.last_root();
                 drop(evm);
                 (Some(bank), last_root)
-            } else {
-                (None, bank.evm().chain_state(chain_id).evm_state.last_root())
             };
             return Ok(StateRootWithBank {
                 state_root: Some(last_root),
@@ -142,7 +148,7 @@ async fn block_to_state_root(
             });
         }
         BlockId::RelativeId(BlockRelId::Earliest) | BlockId::Num(Hex(0)) => {
-            meta.get_first_available_evm_block().await
+            meta.get_first_available_evm_block(chain).await
         }
         BlockId::Num(num) => num.0,
         BlockId::BlockHash { block_hash } => {
@@ -161,7 +167,7 @@ async fn block_to_state_root(
     };
     Ok(StateRootWithBank {
         state_root: meta
-            .get_evm_block_by_id(block_num) // TODO: don't request full block.
+            .get_evm_block_by_id(chain, block_num) // TODO: don't request full block.
             .await
             .filter(|(b, _)| {
                 // if requested specific block hash, check that block with this hash is not in reorged fork
@@ -174,7 +180,7 @@ async fn block_to_state_root(
         bank: None,
         block: block_id,
         block_timestamp: meta
-            .get_evm_block_by_id(block_num)
+            .get_evm_block_by_id(chain, block_num)
             .await
             .map(|(block, _)| block.header.timestamp),
     })
@@ -183,20 +189,31 @@ async fn block_to_state_root(
 #[instrument(skip(meta))]
 async fn block_parse_confirmed_num(
     block: Option<BlockId>,
+    chain: Option<ChainID>,
     meta: &JsonRpcRequestProcessor,
 ) -> Option<u64> {
     let block = block.unwrap_or_default();
     match block {
         BlockId::BlockHash { .. } => None,
         BlockId::RelativeId(BlockRelId::Earliest) => {
-            Some(meta.get_first_available_evm_block().await)
+            Some(meta.get_first_available_evm_block(chain).await)
         }
         BlockId::RelativeId(BlockRelId::Pending) | BlockId::RelativeId(BlockRelId::Latest) => {
-            Some(meta.get_last_confirmed_evm_block().unwrap_or_else(|| {
+            let block_num = meta.get_last_confirmed_evm_block(chain);
+            if let Some(block_num) = block_num {
+                return Some(block_num);
+            }
+
+            Some(if let Some(chain_id) = chain {
+                let bank = meta.bank(Some(CommitmentConfig::processed()));
+                let evm = &bank.evm().chain_state(chain_id).evm_state;
+
+                evm.block_number().saturating_sub(1)
+            } else {
                 let bank = meta.bank(Some(CommitmentConfig::processed()));
                 let evm = bank.evm().main_chain().state();
                 evm.block_number().saturating_sub(1)
-            }))
+            })
         }
 
         BlockId::Num(num) => Some(num.0),
@@ -274,11 +291,7 @@ impl ChainERPC for ChainErpcImpl {
 
     #[instrument(skip(self, meta))]
     fn block_number(&self, meta: Self::Metadata) -> BoxFuture<Result<Hex<usize>, Error>> {
-        Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
-            ChainIDErpcImpl.block_number(meta, chain_id).await
-        })
+        Box::pin(async move { ChainIDErpcImpl.block_number(meta, None).await })
     }
 
     #[instrument(skip(self, meta))]
@@ -288,13 +301,7 @@ impl ChainERPC for ChainErpcImpl {
         address: Address,
         block: Option<BlockId>,
     ) -> BoxFuture<Result<U256, Error>> {
-        Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
-            ChainIDErpcImpl
-                .balance(meta, chain_id, address, block)
-                .await
-        })
+        Box::pin(async move { ChainIDErpcImpl.balance(meta, None, address, block).await })
     }
 
     #[instrument(skip(self, meta))]
@@ -306,10 +313,8 @@ impl ChainERPC for ChainErpcImpl {
         block: Option<BlockId>,
     ) -> BoxFuture<Result<H256, Error>> {
         Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
             ChainIDErpcImpl
-                .storage_at(meta, chain_id, address, data, block)
+                .storage_at(meta, None, address, data, block)
                 .await
         })
     }
@@ -322,10 +327,8 @@ impl ChainERPC for ChainErpcImpl {
         block: Option<BlockId>,
     ) -> BoxFuture<Result<U256, Error>> {
         Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
             ChainIDErpcImpl
-                .transaction_count(meta, chain_id, address, block)
+                .transaction_count(meta, None, address, block)
                 .await
         })
     }
@@ -337,10 +340,8 @@ impl ChainERPC for ChainErpcImpl {
         block: BlockId,
     ) -> BoxFuture<Result<Hex<usize>, Error>> {
         Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
             ChainIDErpcImpl
-                .block_transaction_count_by_number(meta, chain_id, block)
+                .block_transaction_count_by_number(meta, None, block)
                 .await
         })
     }
@@ -352,10 +353,8 @@ impl ChainERPC for ChainErpcImpl {
         block_hash: H256,
     ) -> BoxFuture<Result<Hex<usize>, Error>> {
         Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
             ChainIDErpcImpl
-                .block_transaction_count_by_hash(meta, chain_id, block_hash)
+                .block_transaction_count_by_hash(meta, None, block_hash)
                 .await
         })
     }
@@ -370,7 +369,7 @@ impl ChainERPC for ChainErpcImpl {
         Box::pin(async move {
             let chain_id = meta.get_main_chain_id();
 
-            ChainIDErpcImpl.code(meta, chain_id, address, block).await
+            ChainIDErpcImpl.code(meta, None, address, block).await
         })
     }
 
@@ -383,10 +382,8 @@ impl ChainERPC for ChainErpcImpl {
     ) -> BoxFuture<Result<Option<RPCBlock>, Error>> {
         debug!("Requested hash = {:?}", block_hash.0);
         Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
             ChainIDErpcImpl
-                .block_by_hash(meta, chain_id, block_hash, full)
+                .block_by_hash(meta, None, block_hash, full)
                 .await
         })
     }
@@ -399,12 +396,10 @@ impl ChainERPC for ChainErpcImpl {
         full: bool,
     ) -> BoxFuture<Result<Option<RPCBlock>, Error>> {
         Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
             ChainIDErpcImpl
-                .block_by_number(meta, chain_id, block, full)
+                .block_by_number(meta, None, block, full)
                 .await
         })
-        //Box::pin(ChainIDErpcImpl::block_by_number(meta, chain_id, block, full));
     }
 
     #[instrument(skip(self, meta))]
@@ -414,12 +409,10 @@ impl ChainERPC for ChainErpcImpl {
         tx_hash: H256,
     ) -> BoxFuture<Result<Option<RPCTransaction>, Error>> {
         Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
             ChainIDErpcImpl
-                .transaction_by_hash(meta, chain_id, tx_hash)
+                .transaction_by_hash(meta, None, tx_hash)
                 .await
         })
-        //Box::pin(ChainIDErpcImpl::transaction_by_hash(meta, chain_id, tx_hash));
     }
 
     #[instrument(skip(self, meta))]
@@ -430,10 +423,8 @@ impl ChainERPC for ChainErpcImpl {
         tx_id: Hex<usize>,
     ) -> BoxFuture<Result<Option<RPCTransaction>, Error>> {
         Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
             ChainIDErpcImpl
-                .transaction_by_block_hash_and_index(meta, chain_id, block_hash, tx_id)
+                .transaction_by_block_hash_and_index(meta, None, block_hash, tx_id)
                 .await
         })
     }
@@ -446,10 +437,8 @@ impl ChainERPC for ChainErpcImpl {
         tx_id: Hex<usize>,
     ) -> BoxFuture<Result<Option<RPCTransaction>, Error>> {
         Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
             ChainIDErpcImpl
-                .transaction_by_block_number_and_index(meta, chain_id, block, tx_id)
+                .transaction_by_block_number_and_index(meta, None, block, tx_id)
                 .await
         })
     }
@@ -461,10 +450,8 @@ impl ChainERPC for ChainErpcImpl {
         tx_hash: H256,
     ) -> BoxFuture<Result<Option<RPCReceipt>, Error>> {
         Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
             ChainIDErpcImpl
-                .transaction_receipt(meta, chain_id, tx_hash)
+                .transaction_receipt(meta, None, tx_hash)
                 .await
         })
     }
@@ -477,13 +464,7 @@ impl ChainERPC for ChainErpcImpl {
         block: Option<BlockId>,
         meta_keys: Option<Vec<String>>,
     ) -> BoxFuture<Result<Bytes, Error>> {
-        Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
-            ChainIDErpcImpl
-                .call(meta, chain_id, tx, block, meta_keys)
-                .await
-        })
+        Box::pin(async move { ChainIDErpcImpl.call(meta, None, tx, block, meta_keys).await })
     }
 
     #[instrument(skip(self, meta))]
@@ -495,10 +476,8 @@ impl ChainERPC for ChainErpcImpl {
         meta_keys: Option<Vec<String>>,
     ) -> BoxFuture<Result<Gas, Error>> {
         Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
             ChainIDErpcImpl
-                .estimate_gas(meta, chain_id, tx, block, meta_keys)
+                .estimate_gas(meta, None, tx, block, meta_keys)
                 .await
         })
     }
@@ -509,11 +488,7 @@ impl ChainERPC for ChainErpcImpl {
         meta: Self::Metadata,
         log_filter: RPCLogFilter,
     ) -> BoxFuture<Result<Vec<RPCLog>, Error>> {
-        Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
-            ChainIDErpcImpl.logs(meta, chain_id, log_filter).await
-        })
+        Box::pin(async move { ChainIDErpcImpl.logs(meta, None, log_filter).await })
     }
 
     fn uncle_by_block_hash_and_index(
@@ -559,14 +534,16 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn block_number(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
     ) -> BoxFuture<Result<Hex<usize>, Error>> {
         trace!(
-            "Calling ChainIDErpcImpl::block_number with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::block_number with chainID:{:?}",
+            chain
         );
         Box::pin(async move {
-            let block = block_parse_confirmed_num(None, &meta).await.unwrap_or(0);
+            let block = block_parse_confirmed_num(None, chain, &meta)
+                .await
+                .unwrap_or(0);
             Ok(Hex(block as usize))
         })
     }
@@ -575,13 +552,13 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn balance(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         address: Address,
         block: Option<BlockId>,
     ) -> BoxFuture<Result<U256, Error>> {
-        trace!("Calling ChainIDErpcImpl::balance with chainID:{}", chain_id);
+        trace!("Calling ChainIDErpcImpl::balance with chainID:{:?}", chain);
         Box::pin(async move {
-            let state = block_to_state_root(chain_id, block, &meta).await;
+            let state = block_to_state_root(chain, block, &meta).await;
 
             let account = state
                 .unwrap()
@@ -595,17 +572,17 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn storage_at(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         address: Address,
         data: U256,
         block: Option<BlockId>,
     ) -> BoxFuture<Result<H256, Error>> {
         trace!(
-            "Calling ChainIDErpcImpl::storage_at with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::storage_at with chainID:{:?}",
+            chain
         );
         Box::pin(async move {
-            let state = block_to_state_root(chain_id, block, &meta).await;
+            let state = block_to_state_root(chain, block, &meta).await;
             let mut bytes = [0u8; 32];
             data.to_big_endian(&mut bytes);
             let storage = state
@@ -620,16 +597,16 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn transaction_count(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         address: Address,
         block: Option<BlockId>,
     ) -> BoxFuture<Result<U256, Error>> {
         trace!(
-            "Calling ChainIDErpcImpl::transaction_count with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::transaction_count with chainID:{:?}",
+            chain
         );
         Box::pin(async move {
-            let state = block_to_state_root(chain_id, block, &meta).await;
+            let state = block_to_state_root(chain, block, &meta).await;
 
             let account = state
                 .unwrap()
@@ -643,16 +620,16 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn block_transaction_count_by_number(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         block: BlockId,
     ) -> BoxFuture<Result<Hex<usize>, Error>> {
         trace!(
-            "Calling ChainIDErpcImpl::block_transaction_count_by_number with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::block_transaction_count_by_number with chainID:{:?}",
+            chain
         );
         Box::pin(async move {
-            let (evm_block, _) = match block_parse_confirmed_num(Some(block), &meta).await {
-                Some(num) => meta.get_evm_block_by_id(num).await,
+            let (evm_block, _) = match block_parse_confirmed_num(Some(block), chain, &meta).await {
+                Some(num) => meta.get_evm_block_by_id(chain, num).await,
                 None => None,
             }
             .ok_or(Error::BlockNotFound { block })?;
@@ -664,16 +641,16 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn block_transaction_count_by_hash(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         block_hash: H256,
     ) -> BoxFuture<Result<Hex<usize>, Error>> {
         trace!(
-            "Calling ChainIDErpcImpl::block_transaction_count_by_hash with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::block_transaction_count_by_hash with chainID:{:?}",
+            chain
         );
         Box::pin(async move {
             let (evm_block, _) = match meta.get_evm_block_id_by_hash(block_hash).await {
-                Some(num) => meta.get_evm_block_by_id(num).await,
+                Some(num) => meta.get_evm_block_by_id(chain, num).await,
                 None => None,
             }
             .ok_or(Error::BlockNotFound {
@@ -687,13 +664,13 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn code(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         address: Address,
         block: Option<BlockId>,
     ) -> BoxFuture<Result<Bytes, Error>> {
-        trace!("Calling ChainIDErpcImpl::code with chainID:{}", chain_id);
+        trace!("Calling ChainIDErpcImpl::code with chainID:{:?}", chain);
         Box::pin(async move {
-            let state = block_to_state_root(chain_id, block, &meta).await;
+            let state = block_to_state_root(chain, block, &meta).await;
 
             let account = state
                 .unwrap()
@@ -707,14 +684,14 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn block_by_hash(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         block_hash: H256,
         full: bool,
     ) -> BoxFuture<Result<Option<RPCBlock>, Error>> {
         debug!("Requested hash = {:?}", block_hash.0);
         trace!(
-            "Calling ChainIDErpcImpl::block_by_hash with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::block_by_hash with chainID:{:?}",
+            chain
         );
         Box::pin(async move {
             let block = match meta.get_evm_block_id_by_hash(block_hash).await {
@@ -722,7 +699,7 @@ impl ChainIDERPC for ChainIDErpcImpl {
                     error!("Not found block for hash:{}", block_hash);
                     return Ok(None);
                 }
-                Some(b) => match meta.get_evm_block_by_id(b).await {
+                Some(b) => match meta.get_evm_block_by_id(chain, b).await {
                     // check that found block only in valid fork.
                     Some((block, _above_our_chain)) if block.header.hash() == block_hash => b,
                     _ => return Ok(None),
@@ -730,7 +707,7 @@ impl ChainIDERPC for ChainIDErpcImpl {
             };
             debug!("Found block = {:?}", block);
 
-            block_by_number(meta, chain_id, block.into(), full).await
+            block_by_number(meta, chain, block.into(), full).await
         })
     }
 
@@ -738,17 +715,17 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn block_by_number(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         block: BlockId,
         full: bool,
     ) -> BoxFuture<Result<Option<RPCBlock>, Error>> {
         trace!(
-            "Calling ChainIDErpcImpl::block_by_number with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::block_by_number with chainID:{:?}",
+            chain
         );
 
         Box::pin(async move {
-            let result = block_by_number(meta, chain_id, block, full).await;
+            let result = block_by_number(meta, chain, block, full).await;
             result
         })
     }
@@ -757,15 +734,15 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn transaction_by_hash(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         tx_hash: H256,
     ) -> BoxFuture<Result<Option<RPCTransaction>, Error>> {
         trace!(
-            "Calling ChainIDErpcImpl::transaction_by_hash with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::transaction_by_hash with chainID:{:?}",
+            chain
         );
         Box::pin(async move {
-            let result = transaction_by_hash(meta, chain_id, tx_hash).await;
+            let result = transaction_by_hash(meta, chain, tx_hash).await;
             result
         })
     }
@@ -774,18 +751,18 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn transaction_by_block_hash_and_index(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         block_hash: H256,
         tx_id: Hex<usize>,
     ) -> BoxFuture<Result<Option<RPCTransaction>, Error>> {
         trace!(
-            "Calling ChainIDErpcImpl::transaction_by_block_hash_and_index with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::transaction_by_block_hash_and_index with chainID:{:?}",
+            chain
         );
 
         Box::pin(async move {
             let (evm_block, _) = match meta.get_evm_block_id_by_hash(block_hash).await {
-                Some(num) => meta.get_evm_block_by_id(num).await,
+                Some(num) => meta.get_evm_block_by_id(chain, num).await,
                 None => None,
             }
             .ok_or(Error::BlockNotFound {
@@ -796,7 +773,7 @@ impl ChainIDERPC for ChainIDErpcImpl {
                     receipt.clone(),
                     *hash,
                     evm_block.header.hash(),
-                    chain_id,
+                    chain.unwrap_or_else(|| meta.get_main_chain_id()),
                 )?)),
                 None => Ok(None),
             }
@@ -807,18 +784,18 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn transaction_by_block_number_and_index(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         block: BlockId,
         tx_id: Hex<usize>,
     ) -> BoxFuture<Result<Option<RPCTransaction>, Error>> {
         trace!(
-            "Calling ChainIDErpcImpl::transaction_by_block_number_and_index with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::transaction_by_block_number_and_index with chainID:{:?}",
+            chain
         );
 
         Box::pin(async move {
-            let (evm_block, _) = match block_parse_confirmed_num(Some(block), &meta).await {
-                Some(num) => meta.get_evm_block_by_id(num).await,
+            let (evm_block, _) = match block_parse_confirmed_num(Some(block), chain, &meta).await {
+                Some(num) => meta.get_evm_block_by_id(chain, num).await,
                 None => None,
             }
             .ok_or(Error::BlockNotFound { block })?;
@@ -827,7 +804,7 @@ impl ChainIDERPC for ChainIDErpcImpl {
                     receipt.clone(),
                     *hash,
                     evm_block.header.hash(),
-                    chain_id,
+                    chain.unwrap_or_else(|| meta.get_main_chain_id()),
                 )?)),
                 None => Ok(None),
             }
@@ -838,24 +815,24 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn transaction_receipt(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         tx_hash: H256,
     ) -> BoxFuture<Result<Option<RPCReceipt>, Error>> {
         trace!(
-            "Calling ChainIDErpcImpl::transaction_receipt with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::transaction_receipt with chainID:{:?}",
+            chain
         );
         Box::pin(async move {
             Ok(match meta.get_evm_receipt_by_hash(tx_hash).await {
                 Some(receipt) => {
-                    let (block, _) =
-                        meta.get_evm_block_by_id(receipt.block_number)
-                            .await
-                            .ok_or({
-                                Error::BlockNotFound {
-                                    block: receipt.block_number.into(),
-                                }
-                            })?;
+                    let (block, _) = meta
+                        .get_evm_block_by_id(chain, receipt.block_number)
+                        .await
+                        .ok_or({
+                            Error::BlockNotFound {
+                                block: receipt.block_number.into(),
+                            }
+                        })?;
                     let block_hash = block.header.hash();
                     Some(RPCReceipt::new_from_receipt(
                         receipt, tx_hash, block_hash, None,
@@ -870,12 +847,12 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn call(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         tx: RPCTransaction,
         block: Option<BlockId>,
         meta_keys: Option<Vec<String>>,
     ) -> BoxFuture<Result<Bytes, Error>> {
-        trace!("Calling ChainIDErpcImpl::call with chainID:{}", chain_id);
+        trace!("Calling ChainIDErpcImpl::call with chainID:{:?}", chain);
 
         let meta_keys = match meta_keys
             .into_iter()
@@ -888,7 +865,7 @@ impl ChainIDERPC for ChainIDErpcImpl {
             Err(err) => return Box::pin(ready(Err(err))),
         };
         Box::pin(async move {
-            let saved_state = block_to_state_root(chain_id, block, &meta).await;
+            let saved_state = block_to_state_root(chain, block, &meta).await;
 
             let result = call(meta, tx, saved_state.unwrap(), meta_keys)?;
             Ok(Bytes(result.exit_data))
@@ -899,14 +876,14 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn estimate_gas(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         tx: RPCTransaction,
         block: Option<BlockId>,
         meta_keys: Option<Vec<String>>,
     ) -> BoxFuture<Result<Gas, Error>> {
         trace!(
-            "Calling ChainIDErpcImpl::estimate_gas with chainID:{}",
-            chain_id
+            "Calling ChainIDErpcImpl::estimate_gas with chainID:{:?}",
+            chain
         );
 
         Box::pin(async move {
@@ -916,7 +893,7 @@ impl ChainIDERPC for ChainIDErpcImpl {
                 .map(|s| solana_sdk::pubkey::Pubkey::from_str(&s))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| into_native_error(e, false))?;
-            let saved_state = block_to_state_root(chain_id, block, &meta).await;
+            let saved_state = block_to_state_root(chain, block, &meta).await;
             let result = call(meta, tx, saved_state.unwrap(), meta_keys)?;
             Ok(result.used_gas.into())
         })
@@ -926,20 +903,20 @@ impl ChainIDERPC for ChainIDErpcImpl {
     fn logs(
         &self,
         meta: Self::Metadata,
-        chain_id: ChainID,
+        chain: EvmChain,
         log_filter: RPCLogFilter,
     ) -> BoxFuture<Result<Vec<RPCLog>, Error>> {
-        trace!("Calling ChainIDErpcImpl::logs with chainID:{}", chain_id);
+        trace!("Calling ChainIDErpcImpl::logs with chainID:{:?}", chain);
 
         Box::pin(async move {
             const MAX_NUM_BLOCKS: u64 = 2000;
             let block_num = meta
-                .get_last_available_evm_block()
+                .get_last_available_evm_block(chain)
                 .ok_or(Error::ArchiveNotSupported)?;
-            let to = block_parse_confirmed_num(log_filter.to_block, &meta)
+            let to = block_parse_confirmed_num(log_filter.to_block, chain, &meta)
                 .await
                 .unwrap_or(block_num);
-            let from = block_parse_confirmed_num(log_filter.from_block, &meta)
+            let from = block_parse_confirmed_num(log_filter.from_block, chain, &meta)
                 .await
                 .unwrap_or(block_num);
             if to > from + MAX_NUM_BLOCKS {
@@ -973,7 +950,7 @@ impl ChainIDERPC for ChainIDErpcImpl {
             };
             debug!("filter = {:?}", filter);
 
-            let logs = meta.filter_logs(filter).await.map_err(|e| {
+            let logs = meta.filter_logs(chain, filter).await.map_err(|e| {
                 debug!("filter_logs error = {:?}", e);
                 into_native_error(e, false)
             })?;
@@ -1028,17 +1005,16 @@ impl TraceERPC for TraceErpcImpl {
         let chain_id = meta.get_main_chain_id();
 
         Box::pin(async move {
-            match transaction_by_hash(meta.clone(), chain_id, tx_hash).await {
+            match transaction_by_hash(meta.clone(), None, tx_hash).await {
                 Ok(Some(tx)) => {
                     let (tx_block, tx_index) = match (tx.block_number, tx.transaction_index) {
                         (Some(block), Some(index)) => (block.as_u64(), index.0),
                         _ => return Ok(None),
                     };
                     let base_block = tx_block.saturating_sub(1).into();
-                    let tx_traces = match meta.get_evm_block_by_id(tx_block).await {
+                    let tx_traces = match meta.get_evm_block_by_id(None, tx_block).await {
                         Some((block, _)) => {
                             let block_hash = block.header.hash();
-                            let chain_id = meta.bank(None).evm().main_chain().id();
                             block
                                 .transactions
                                 .into_iter()
@@ -1080,13 +1056,12 @@ impl TraceERPC for TraceErpcImpl {
         let chain_id = meta.get_main_chain_id();
 
         Box::pin(async move {
-            let block = if let Some(block) =
-                block_by_number(meta.clone(), chain_id, block_num, true).await?
-            {
-                block
-            } else {
-                return Err(Error::StateNotFoundForBlock { block: block_num });
-            };
+            let block =
+                if let Some(block) = block_by_number(meta.clone(), None, block_num, true).await? {
+                    block
+                } else {
+                    return Err(Error::StateNotFoundForBlock { block: block_num });
+                };
             let txs = match block.transactions {
                 Either::Right(txs) => txs,
                 _ => return Err(Error::Unimplemented {}),
@@ -1605,13 +1580,13 @@ fn call_inner(
 #[instrument(skip(meta))]
 async fn block_by_number(
     meta: Arc<JsonRpcRequestProcessor>,
-    chain_id: ChainID,
+    chain: EvmChain,
     block: BlockId,
     full: bool,
 ) -> Result<Option<RPCBlock>, Error> {
-    let num = block_parse_confirmed_num(Some(block), &meta).await;
+    let num = block_parse_confirmed_num(Some(block), chain, &meta).await;
     let evm_block = match num {
-        Some(block_num) => meta.get_evm_block_by_id(block_num).await,
+        Some(block_num) => meta.get_evm_block_by_id(chain, block_num).await,
         None => None,
     };
     // TODO: Inline evm_state lookups, and request only solana headers.
@@ -1623,6 +1598,7 @@ async fn block_by_number(
         Some(b) => b,
     };
 
+    let chain_id = chain.unwrap_or_else(|| meta.get_main_chain_id());
     let block_hash = block.header.hash();
     let transactions = if full {
         let txs = block
@@ -1648,13 +1624,13 @@ async fn block_by_number(
 #[instrument(skip(meta))]
 async fn transaction_by_hash(
     meta: Arc<JsonRpcRequestProcessor>,
-    chain_id: ChainID,
+    chain: EvmChain,
     tx_hash: H256,
 ) -> Result<Option<RPCTransaction>, Error> {
     Ok(match meta.get_evm_receipt_by_hash(tx_hash).await {
         Some(receipt) => {
             let (block, _) = meta
-                .get_evm_block_by_id(receipt.block_number)
+                .get_evm_block_by_id(chain, receipt.block_number)
                 .await
                 .ok_or({
                     Error::BlockNotFound {
@@ -1663,7 +1639,10 @@ async fn transaction_by_hash(
                 })?;
             let block_hash = block.header.hash();
             Some(RPCTransaction::new_from_receipt(
-                receipt, tx_hash, block_hash, chain_id,
+                receipt,
+                tx_hash,
+                block_hash,
+                chain.unwrap_or_else(|| meta.get_main_chain_id()),
             )?)
         }
         None => None,
@@ -1678,7 +1657,7 @@ async fn trace_call_many(
     estimate: bool,
 ) -> Result<Vec<evm_rpc::trace::TraceResultsWithTransactionHash>, Error> {
     let chain_id = meta.get_main_chain_id();
-    let saved_state = block_to_state_root(chain_id, block, &meta).await;
+    let saved_state = block_to_state_root(None, block, &meta).await;
 
     let mut txs = Vec::new();
     let mut txs_meta = Vec::new();

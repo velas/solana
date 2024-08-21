@@ -31,6 +31,7 @@ use {
     solana_entry::entry::{create_ticks, Entry},
     solana_measure::measure::Measure,
     solana_metrics::{datapoint_debug, datapoint_error},
+    solana_program_runtime::evm_executor_context::Chain,
     solana_rayon_threadlimit::get_thread_count,
     solana_runtime::hardened_unpack::{unpack_genesis_archive, MAX_GENESIS_ARCHIVE_UNPACKED_SIZE},
     solana_sdk::{
@@ -191,6 +192,10 @@ pub struct Blockstore {
     evm_transactions_cf: LedgerColumn<cf::EvmTransactionReceipts>,
     evm_blocks_by_hash_cf: LedgerColumn<cf::EvmHeaderIndexByHash>,
     evm_blocks_by_slot_cf: LedgerColumn<cf::EvmHeaderIndexBySlot>,
+
+    // evm subchain
+    evm_subchain_blocks_cf: LedgerColumn<cf::EvmSubchainBlockHeader>,
+    evm_subchain_blocks_by_slot_cf: LedgerColumn<cf::EvmSubchainHeaderIndexBySlot>,
 }
 
 pub struct IndexMetaWorkingSetEntry {
@@ -522,9 +527,7 @@ macro_rules! rocksdb_metric_header {
         )
     };
 }
-use rocksdb_metric_header;
-
-use crate::blockstore_db::EvmTransactionReceiptsIndex;
+use {crate::blockstore_db::EvmTransactionReceiptsIndex, rocksdb_metric_header};
 
 impl Blockstore {
     pub fn db(self) -> Arc<Database> {
@@ -598,6 +601,8 @@ impl Blockstore {
         let evm_transactions_cf = db.column();
         let evm_blocks_by_hash_cf = db.column();
         let evm_blocks_by_slot_cf = db.column();
+        let evm_subchain_blocks_cf = db.column();
+        let evm_subchain_blocks_by_slot_cf = db.column();
         let optimistic_slots_cf = db.column();
 
         let db = Arc::new(db);
@@ -663,6 +668,8 @@ impl Blockstore {
             evm_transactions_cf,
             evm_blocks_by_hash_cf,
             evm_blocks_by_slot_cf,
+            evm_subchain_blocks_cf,
+            evm_subchain_blocks_by_slot_cf,
         };
         if initialize_transaction_status_index {
             blockstore.initialize_transaction_status_index()?;
@@ -2367,12 +2374,30 @@ impl Blockstore {
     ///
     pub fn evm_blocks_iterator(
         &self,
+        chain: Chain,
         block_num: evm::BlockNum,
     ) -> Result<impl Iterator<Item = ((evm::BlockNum, Option<Slot>), evm::BlockHeader)> + '_> {
-        let blocks_headers = self.evm_blocks_cf.iter(IteratorMode::From(
-            cf::EvmBlockHeader::as_index(block_num),
-            IteratorDirection::Forward,
-        ))?;
+        let blocks_headers: Box<
+            dyn Iterator<Item = ((evm::BlockNum, Option<Slot>), Box<[u8]>)> + Send + Sync,
+        > = if let Some(subchain) = chain {
+            Box::new(
+                self.evm_subchain_blocks_cf
+                    .iter(IteratorMode::From(
+                        (subchain, 0, 0),
+                        IteratorDirection::Forward,
+                    ))?
+                    .take_while(move |((chain_id_from_bd, _block_num, _slot), _)| {
+                        *chain_id_from_bd == subchain
+                    })
+                    .map(|((_chain_id, block_num, slot), value)| ((block_num, Some(slot)), value)),
+            )
+        } else {
+            Box::new(self.evm_blocks_cf.iter(IteratorMode::From(
+                cf::EvmBlockHeader::as_index(block_num),
+                IteratorDirection::Forward,
+            ))?)
+        };
+
         Ok(blocks_headers.map(move |(block_num, block_header)| {
             (
                 block_num,
@@ -2397,25 +2422,42 @@ impl Blockstore {
     /// TODO: naming (check evm_blocks_iterator: same naming, different semantic)
     pub fn evm_blocks_reverse_iterator(
         &self,
+        chain: Chain,
     ) -> Result<impl Iterator<Item = ((evm::BlockNum, Option<Slot>), evm::BlockHeader)> + '_> {
-        Ok(self
-            .evm_blocks_cf
-            .iter(IteratorMode::End)?
-            .map(move |(block_num, block_header)| {
-                (
-                    block_num,
-                    self.evm_blocks_cf
-                        .deserialize_protobuf_or_bincode::<evm::BlockHeader>(&block_header)
-                        .unwrap_or_else(|e| {
-                            panic!(
+        let iter: Box<dyn Iterator<Item = ((evm::BlockNum, Option<Slot>), Box<[u8]>)>> =
+            if let Some(chain_id) = chain {
+                Box::new(
+                    self.evm_subchain_blocks_cf
+                        .iter(IteratorMode::From(
+                            (chain_id, u64::MAX, u64::MAX),
+                            IteratorDirection::Reverse,
+                        ))?
+                        .take_while(move |((chain_id_from_bd, _block_num, _slot), _)| {
+                            *chain_id_from_bd == chain_id
+                        })
+                        .map(|((_chain_id, block_num, slot), value)| {
+                            ((block_num, Some(slot)), value)
+                        }),
+                )
+            } else {
+                Box::new(self.evm_blocks_cf.iter(IteratorMode::End)?)
+            };
+
+        Ok(iter.map(move |(block_num, block_header)| {
+            (
+                block_num,
+                self.evm_blocks_cf
+                    .deserialize_protobuf_or_bincode::<evm::BlockHeader>(&block_header)
+                    .unwrap_or_else(|e| {
+                        panic!(
                             "Could not deserialize BlockHeader for block_num {} slot {:?}: {:?}",
                             block_num.0, block_num.1, e
                         )
-                        })
-                        .try_into()
-                        .expect("Convertation should always pass"),
-                )
-            }))
+                    })
+                    .try_into()
+                    .expect("Convertation should always pass"),
+            )
+        }))
     }
 
     pub fn evm_block_by_slot_iterator(
@@ -2456,21 +2498,46 @@ impl Blockstore {
             }))
     }
 
-    pub fn get_first_available_evm_block(&self) -> Result<evm::BlockNum> {
-        Ok(self
-            .evm_blocks_cf
-            .iter(IteratorMode::Start)?
-            .map(|((block, _slot), _)| block)
-            .next()
-            .unwrap_or(evm::BlockNum::MAX))
+    pub fn get_first_available_evm_block(&self, chain: Chain) -> Result<evm::BlockNum> {
+        Ok(if let Some(subchain_id) = chain {
+            self.evm_subchain_blocks_cf
+                .iter(IteratorMode::From(
+                    (subchain_id, 0, 0),
+                    IteratorDirection::Forward,
+                ))?
+                .take_while(move |((chain_id_from_bd, _block_num, _slot), _)| {
+                    *chain_id_from_bd == subchain_id
+                })
+                .map(|((_chain, block, _slot), _)| block)
+                .next()
+                .unwrap_or(evm::BlockNum::MAX)
+        } else {
+            self.evm_blocks_cf
+                .iter(IteratorMode::Start)?
+                .map(|((block, _slot), _)| block)
+                .next()
+                .unwrap_or(evm::BlockNum::MAX)
+        })
     }
 
-    pub fn get_last_available_evm_block(&self) -> Result<Option<evm::BlockNum>> {
-        Ok(self
-            .evm_blocks_cf
-            .iter(IteratorMode::End)?
-            .map(|((block, _slot), _)| block)
-            .next())
+    pub fn get_last_available_evm_block(&self, chain: Chain) -> Result<Option<evm::BlockNum>> {
+        Ok(if let Some(subchain_id) = chain {
+            self.evm_subchain_blocks_cf
+                .iter(IteratorMode::From(
+                    (subchain_id, u64::MAX, u64::MAX),
+                    IteratorDirection::Reverse,
+                ))?
+                .take_while(move |((chain_id_from_bd, _block_num, _slot), _)| {
+                    *chain_id_from_bd == subchain_id
+                })
+                .map(|((_chain, block, _slot), _)| block)
+                .next()
+        } else {
+            self.evm_blocks_cf
+                .iter(IteratorMode::End)?
+                .map(|((block, _slot), _)| block)
+                .next()
+        })
     }
 
     pub fn get_rooted_block(
@@ -2573,7 +2640,11 @@ impl Blockstore {
     }
 
     /// Returns EVM block, and flag if that block was rooted (confirmed)
-    pub fn get_evm_block(&self, block_number: evm::BlockNum) -> Result<(evm::Block, bool)> {
+    pub fn get_evm_block(
+        &self,
+        chain: Chain,
+        block_number: evm::BlockNum,
+    ) -> Result<(evm::Block, bool)> {
         datapoint_info!("blockstore-rpc-api", ("method", "get_evm_block", String));
         // TODO: Integrate with cleanup service
         // let lowest_cleanup_slot = self.lowest_cleanup_slot.read().unwrap();
@@ -2583,7 +2654,7 @@ impl Blockstore {
         //     return Err(BlockstoreError::SlotCleanedUp);
         // }
 
-        let mut block_headers = self.read_evm_block_headers(block_number)?;
+        let mut block_headers = self.read_evm_block_headers(chain, block_number)?;
 
         if block_headers.is_empty() {
             return Err(BlockstoreError::SlotCleanedUp);
@@ -3358,14 +3429,21 @@ impl Blockstore {
         self.program_costs_cf.delete(*key)
     }
 
-    pub fn write_evm_block_header(&self, block: &evm::BlockHeader) -> Result<()> {
+    pub fn write_evm_block_header(&self, chain: &Chain, block: &evm::BlockHeader) -> Result<()> {
         let proto_block = block.clone().into();
-        self.evm_blocks_cf.put_protobuf(
-            (block.block_number, Some(block.native_chain_slot)),
-            &proto_block,
-        )?;
+        if let Some(chain_id) = chain {
+            self.evm_subchain_blocks_cf.put_protobuf(
+                (*chain_id, block.block_number, block.native_chain_slot),
+                &proto_block,
+            )?;
+        } else {
+            self.evm_blocks_cf.put_protobuf(
+                (block.block_number, Some(block.native_chain_slot)),
+                &proto_block,
+            )?;
+        }
         self.write_evm_block_id_by_hash(block.native_chain_slot, block.hash(), block.block_number)?;
-        self.write_evm_block_id_by_slot(block.native_chain_slot, block.block_number)
+        self.write_evm_block_id_by_slot(chain, block.native_chain_slot, block.block_number)
     }
 
     ///
@@ -3374,10 +3452,11 @@ impl Blockstore {
     ///
     pub fn read_evm_block_headers(
         &self,
+        chain: Chain,
         block_index: evm::BlockNum,
     ) -> Result<Vec<evm::BlockHeader>> {
         Ok(self
-            .evm_blocks_iterator(block_index)?
+            .evm_blocks_iterator(chain, block_index)?
             .take_while(|((block_num, _slot), _block)| *block_num == block_index)
             .map(|((_block_num, _slot), block)| block)
             .collect())
@@ -3409,13 +3488,49 @@ impl Blockstore {
         }
     }
 
-    pub fn write_evm_block_id_by_slot(&self, slot: Slot, id: evm_state::BlockNum) -> Result<()> {
-        self.evm_blocks_by_slot_cf.put_protobuf(slot, &id)
+    pub fn write_evm_block_id_by_slot(
+        &self,
+        chain: &Chain,
+        slot: Slot,
+        id: evm_state::BlockNum,
+    ) -> Result<()> {
+        if let Some(chain) = chain {
+            self.evm_subchain_blocks_by_slot_cf
+                .put_protobuf((slot, *chain), &id)
+        } else {
+            self.evm_blocks_by_slot_cf.put_protobuf(slot, &id)
+        }
     }
 
-    pub fn read_evm_block_id_by_slot(&self, slot: Slot) -> Result<Option<evm_state::BlockNum>> {
-        self.evm_blocks_by_slot_cf
-            .get_protobuf_or_bincode::<evm_state::BlockNum>(slot)
+    pub fn read_evm_block_id_by_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Vec<(evm_state::BlockNum, Chain)>> {
+        let mut result = vec![];
+
+        let main = self
+            .evm_blocks_by_slot_cf
+            .get_protobuf_or_bincode::<evm_state::BlockNum>(slot)?;
+
+        if let Some(block_num) = main {
+            result.push((block_num, None));
+        }
+
+        let iter = self
+            .evm_subchain_blocks_by_slot_cf
+            .iter(IteratorMode::From(
+                cf::EvmSubchainHeaderIndexBySlot::as_index(slot),
+                IteratorDirection::Forward,
+            ))?;
+        for ((slot_it, chain_id), v) in iter {
+            if slot_it == slot {
+                let block_num = self
+                    .evm_subchain_blocks_by_slot_cf
+                    .deserialize_protobuf_or_bincode::<evm_state::BlockNum>(&*v)?;
+                result.push((block_num, Some(chain_id)));
+            }
+        }
+        Ok(result)
     }
 
     /// Try to search for evm transaction in next indexes:
@@ -3566,7 +3681,7 @@ impl Blockstore {
                 data,
             ) in &transactions
             {
-                let blocks = if let Ok(b) = self.evm_blocks_iterator(*block_num) {
+                let blocks = if let Ok(b) = self.evm_blocks_iterator(None, *block_num) {
                     b
                 } else {
                     continue;
@@ -3614,6 +3729,7 @@ impl Blockstore {
 
     pub fn write_evm_transaction(
         &self,
+        _chain: &Chain, // chain_id is not important because we store txs by its hashes.
         block_num: evm_state::BlockNum,
         slot_index: Slot,
         hash: H256,
@@ -3627,7 +3743,7 @@ impl Blockstore {
         let status = status.into();
         self.evm_transactions_cf.put_protobuf(
             EvmTransactionReceiptsIndex {
-                index,
+                index, // TODO: later can reuse index as chain_id
                 hash,
                 block_num,
                 slot: Some(slot_index),

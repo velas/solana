@@ -3191,7 +3191,11 @@ impl ReplayStage {
             bank,
             evm_block_recorder_sender,
             evm_state_recorder_sender,
-            |block| subscriptions.notify_evm_block(block.clone()),
+            |main, block| {
+                if main.is_none() {
+                    subscriptions.notify_evm_block(block.clone())
+                }
+            },
         );
     }
 

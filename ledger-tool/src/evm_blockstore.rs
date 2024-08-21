@@ -1,10 +1,11 @@
 /// The `bigtable` subcommand
 use clap::{value_t, value_t_or_exit, App, AppSettings, Arg, ArgMatches, SubCommand};
-use solana_clap_utils::input_validators::is_slot;
-
-use solana_ledger::{blockstore::Blockstore, blockstore_db::AccessType};
-use solana_sdk::clock::Slot;
-use std::{path::Path, process::exit, result::Result};
+use {
+    solana_clap_utils::input_validators::is_slot,
+    solana_ledger::{blockstore::Blockstore, blockstore_db::AccessType},
+    solana_sdk::clock::Slot,
+    std::{path::Path, process::exit, result::Result},
+};
 
 pub fn modify_block(
     blockstore: Blockstore,
@@ -14,7 +15,7 @@ pub fn modify_block(
     timestamp: Option<u64>,
     skip_consistency_check: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (mut block, confirmed) = blockstore.get_evm_block(block_num)?;
+    let (mut block, confirmed) = blockstore.get_evm_block(None, block_num)?;
     println!("Found block = {:?}, confirmed = {}", block, confirmed);
     block.header.native_chain_hash = native_hash;
     block.header.native_chain_slot = native_slot;
@@ -22,7 +23,7 @@ pub fn modify_block(
         block.header.timestamp = timestamp;
     }
     if !skip_consistency_check {
-        let (next_block, confirmed) = blockstore.get_evm_block(block_num + 1)?;
+        let (next_block, confirmed) = blockstore.get_evm_block(None, block_num + 1)?;
 
         println!(
             "Next block num = {}, parent_hash = {:?}, confirmed = {}",
@@ -38,11 +39,12 @@ pub fn modify_block(
         }
     }
     blockstore
-        .write_evm_block_header(&block.header)
+        .write_evm_block_header(&None, &block.header)
         .expect("Expected database write to succed");
     for (hash, tx) in block.transactions {
         blockstore
             .write_evm_transaction(
+                &None,
                 block.header.block_number,
                 block.header.native_chain_slot,
                 hash,
@@ -54,7 +56,7 @@ pub fn modify_block(
 }
 
 pub fn first_available_block(blockstore: Blockstore) -> Result<(), Box<dyn std::error::Error>> {
-    match blockstore.get_first_available_evm_block() {
+    match blockstore.get_first_available_evm_block(None) {
         Ok(block) => println!("{}", block),
         Err(e) => println!("No blocks available = {:?}", e),
     }
@@ -62,7 +64,7 @@ pub fn first_available_block(blockstore: Blockstore) -> Result<(), Box<dyn std::
 }
 
 pub fn last_available_block(blockstore: Blockstore) -> Result<(), Box<dyn std::error::Error>> {
-    match blockstore.get_last_available_evm_block()? {
+    match blockstore.get_last_available_evm_block(None)? {
         Some(block) => println!("{}", block),
         None => println!("No blocks available"),
     }
@@ -73,7 +75,7 @@ pub fn block(
     blockstore: Blockstore,
     block_num: evm_state::BlockNum,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match blockstore.get_evm_block(block_num) {
+    match blockstore.get_evm_block(None, block_num) {
         Ok((block, confirmed)) => {
             println!("{:?}, confirmed={}", block, confirmed);
             println!("block_hash={:?}", block.header.hash());
@@ -89,7 +91,7 @@ pub fn blocks(
     limit: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let slots: Vec<_> = blockstore
-        .evm_blocks_iterator(starting_slot)?
+        .evm_blocks_iterator(None, starting_slot)?
         .take(limit)
         .map(|((b, slot), _)| (b, slot))
         .collect();

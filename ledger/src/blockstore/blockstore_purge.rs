@@ -1,5 +1,4 @@
-use evm_state::BlockNum;
-use {super::*, solana_sdk::message::AccountKeys, std::time::Instant};
+use {super::*, evm_state::BlockNum, solana_sdk::message::AccountKeys, std::time::Instant};
 
 #[derive(Default)]
 pub struct PurgeStats {
@@ -232,17 +231,33 @@ impl Blockstore {
                     from_slot,
                     to_slot_inclusive,
                 )
+                .is_ok()
+            & self
+                .db
+                .delete_range_cf::<cf::EvmSubchainBlockHeader>(
+                    &mut write_batch,
+                    from_slot,
+                    to_slot_inclusive,
+                )
+                .is_ok()
+            & self
+                .db
+                .delete_range_cf::<cf::EvmSubchainHeaderIndexBySlot>(
+                    &mut write_batch,
+                    from_slot,
+                    to_slot_inclusive,
+                )
                 .is_ok();
 
-        let first_slot = self.evm_block_by_slot_iterator(from_slot)?.next();
-        let last_slot = self.evm_block_by_slot_reverse_iterator(to_slot)?.next();
+        let first_slot_block = self.evm_block_by_slot_iterator(from_slot)?.next();
+        let last_slot_block = self.evm_block_by_slot_reverse_iterator(to_slot)?.next();
         // Get evm blocks with slots in range [from_slot; to_slot] and
         // use block_number of those blocks to clear respective records from EvmBlockHeader column
-        if matches!((&first_slot, &last_slot),
+        if matches!((&first_slot_block, &last_slot_block),
             (Some(first_slot), Some(last_slot)) if first_slot.0 <= to_slot && last_slot.0 >= from_slot)
         {
-            let first_block_num = first_slot.unwrap().1;
-            let last_block_num = last_slot.unwrap().1;
+            let first_block_num = first_slot_block.unwrap().1;
+            let last_block_num = last_slot_block.unwrap().1;
             columns_purged &= write_batch
                 .delete_range_cf::<cf::EvmBlockHeader>(
                     self.db.cf_handle::<cf::EvmBlockHeader>(),
@@ -390,11 +405,28 @@ impl Blockstore {
                 .evm_transactions_cf
                 .compact_range(0, 2)
                 .unwrap_or(false)
+            && self
+                .evm_subchain_blocks_by_slot_cf
+                .compact_range(from_slot, to_slot)
+                .unwrap_or(false)
             && match evm_block_range {
-                Some((from, to)) => self.evm_blocks_cf.compact_range(from, to),
-                None => self.evm_blocks_cf.compact_range(u64::MIN, u64::MAX),
-            }
-            .unwrap_or(false);
+                Some((from, to)) => {
+                    self.evm_blocks_cf.compact_range(from, to).unwrap_or(false)
+                        && self
+                            .evm_subchain_blocks_cf
+                            .compact_range(from, to)
+                            .unwrap_or(false)
+                }
+                None => {
+                    self.evm_blocks_cf
+                        .compact_range(u64::MIN, u64::MAX)
+                        .unwrap_or(false)
+                        && self
+                            .evm_subchain_blocks_cf
+                            .compact_range(u64::MIN, u64::MAX)
+                            .unwrap_or(false)
+                }
+            };
         compact_timer.stop();
         if !result {
             info!("compact_storage incomplete");
@@ -442,8 +474,9 @@ impl Blockstore {
                     }
                 }
             }
-            if let Ok(Some(block_num)) = self.read_evm_block_id_by_slot(slot) {
-                if let Ok(evm_headers) = self.read_evm_block_headers(block_num) {
+
+            for (block_num, chain) in self.read_evm_block_id_by_slot(slot)? {
+                if let Ok(evm_headers) = self.read_evm_block_headers(chain, block_num) {
                     for header in evm_headers {
                         batch.delete::<cf::EvmHeaderIndexByHash>((0, header.hash()))?;
                         batch.delete::<cf::EvmHeaderIndexByHash>((1, header.hash()))?;
@@ -1335,13 +1368,16 @@ pub mod tests {
 
             blockstore
                 .write_evm_transaction(
+                    &None,
                     block_num,
                     block_num,
                     transaction.signing_hash(None),
                     receipt,
                 )
                 .unwrap();
-            blockstore.write_evm_block_header(&evm_block).unwrap();
+            blockstore
+                .write_evm_block_header(&None, &evm_block)
+                .unwrap();
         }
 
         // clear up to slot 1 (inclusive)
@@ -1350,7 +1386,7 @@ pub mod tests {
         test_all_empty_or_min(&blockstore, 2);
 
         // check that everything with slot number 2 is still in database
-        assert_eq!(blockstore.get_first_available_evm_block().unwrap(), 2);
+        assert_eq!(blockstore.get_first_available_evm_block(None).unwrap(), 2);
         assert_eq!(
             blockstore
                 .read_evm_block_id_by_hash(block_hashes[2])
@@ -1358,7 +1394,10 @@ pub mod tests {
                 .unwrap(),
             2
         );
-        assert_eq!(blockstore.read_evm_block_id_by_slot(2).unwrap().unwrap(), 2);
+        assert_eq!(
+            blockstore.read_evm_block_id_by_slot(2).unwrap(),
+            vec![(2, None)]
+        );
         assert!(blockstore
             .read_evm_transaction((tx_hashes[2], 2, Some(2)))
             .unwrap()
@@ -1393,7 +1432,11 @@ pub mod tests {
                 )
                 .unwrap();
             blockstore
-                .write_evm_block_id_by_slot(evm_block.native_chain_slot, evm_block.block_number)
+                .write_evm_block_id_by_slot(
+                    &None,
+                    evm_block.native_chain_slot,
+                    evm_block.block_number,
+                )
                 .unwrap();
         }
 
@@ -1446,13 +1489,16 @@ pub mod tests {
 
             blockstore
                 .write_evm_transaction(
+                    &None,
                     block_num,
                     block_num,
                     transaction.signing_hash(None),
                     receipt,
                 )
                 .unwrap();
-            blockstore.write_evm_block_header(&evm_block).unwrap();
+            blockstore
+                .write_evm_block_header(&None, &evm_block)
+                .unwrap();
         }
 
         // first time to freeze 0 index and switch to index 1
@@ -1486,6 +1532,18 @@ pub mod tests {
             .unwrap()
             .next()
             .is_none());
+        assert!(blockstore
+            .db
+            .iter::<cf::EvmSubchainBlockHeader>(IteratorMode::Start)
+            .unwrap()
+            .next()
+            .is_none());
+        assert!(blockstore
+            .db
+            .iter::<cf::EvmSubchainHeaderIndexBySlot>(IteratorMode::Start)
+            .unwrap()
+            .next()
+            .is_none());
 
         drop(blockstore);
         Blockstore::destroy(&blockstore_path.path())
@@ -1498,7 +1556,7 @@ pub mod tests {
         let blockstore = Blockstore::open(&blockstore_path.path()).unwrap();
 
         blockstore
-            .write_evm_block_header(&create_dummy_evm_block(1, 5))
+            .write_evm_block_header(&None, &create_dummy_evm_block(1, 5))
             .unwrap();
 
         // check that tha data we have starts from slot 5
@@ -1519,16 +1577,16 @@ pub mod tests {
         let blockstore = Blockstore::open(&blockstore_path.path()).unwrap();
 
         blockstore
-            .write_evm_block_header(&create_dummy_evm_block(1, 1))
+            .write_evm_block_header(&None, &create_dummy_evm_block(1, 1))
             .unwrap();
         blockstore
-            .write_evm_block_header(&create_dummy_evm_block(2, 2))
+            .write_evm_block_header(&None, &create_dummy_evm_block(2, 2))
             .unwrap();
         blockstore
-            .write_evm_block_header(&create_dummy_evm_block(3, 100))
+            .write_evm_block_header(&None, &create_dummy_evm_block(3, 100))
             .unwrap();
         blockstore
-            .write_evm_block_header(&create_dummy_evm_block(4, 101))
+            .write_evm_block_header(&None, &create_dummy_evm_block(4, 101))
             .unwrap();
 
         blockstore.purge_and_compact_slots(0, 99);
@@ -1550,16 +1608,16 @@ pub mod tests {
         let blockstore = Blockstore::open(&blockstore_path.path()).unwrap();
 
         blockstore
-            .write_evm_block_header(&create_dummy_evm_block(1, 1))
+            .write_evm_block_header(&None, &create_dummy_evm_block(1, 1))
             .unwrap();
         blockstore
-            .write_evm_block_header(&create_dummy_evm_block(2, 2))
+            .write_evm_block_header(&None, &create_dummy_evm_block(2, 2))
             .unwrap();
         blockstore
-            .write_evm_block_header(&create_dummy_evm_block(3, 100))
+            .write_evm_block_header(&None, &create_dummy_evm_block(3, 100))
             .unwrap();
         blockstore
-            .write_evm_block_header(&create_dummy_evm_block(4, 101))
+            .write_evm_block_header(&None, &create_dummy_evm_block(4, 101))
             .unwrap();
 
         // simulate purge up to slot 99 but leave data in storage

@@ -296,7 +296,7 @@ pub async fn upload_evm_confirmed_blocks(
         starting_block
     );
     let mut block_headers: Vec<_> = blockstore
-        .evm_blocks_iterator(starting_block)
+        .evm_blocks_iterator(None, starting_block)
         .map_err(|err| {
             format!(
                 "Failed to load entries starting from slot {}: {:?}",
@@ -408,7 +408,7 @@ pub async fn upload_evm_confirmed_blocks(
                         break;
                     }
 
-                    let _ = match blockstore.get_evm_block(*block_num) {
+                    let _ = match blockstore.get_evm_block(None, *block_num) {
                         Ok(confirmed_block) => sender.send((*block_num, Some(confirmed_block))),
                         Err(err) => {
                             warn!(
