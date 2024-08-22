@@ -35,6 +35,7 @@ use {
 pub const BURN_ADDR: evm_state::H160 = evm_state::H160::zero();
 
 const SUBCHAIN_CREATION_DEPOSIT_VLX: u64 = 1_000_000;
+const SUBCHAIN_MINT_ADDRES: H160 = H160::repeat_byte(0x11);
 
 /// Return the next AccountInfo or a NotEnoughAccountKeys error
 pub fn next_account_info<'a, 'b, I: Iterator<Item = &'a KeyedAccount<'b>>>(
@@ -290,7 +291,7 @@ impl EvmProcessor {
                     .process_execute_subchain_tx(invoke_context, first_keyed_account, chain_id, tx),
             },
             _ => {
-                ic_msg!(invoke_context, "Instruction is not supported yet.");
+                ic_msg!(invoke_context, "BUG: Instruction is not supported yet.");
                 Err(EvmError::InstructionNotSupportedYet)
             }
         }
@@ -1164,7 +1165,7 @@ impl EvmProcessor {
         for (evm_address, lamports) in &mint_setup {
             let gweis = lamports_to_gwei(*lamports);
             executor.deposit(*evm_address, gweis);
-            executor.register_swap_tx_in_evm(H160::zero(), *evm_address, gweis);
+            executor.register_swap_tx_in_evm(SUBCHAIN_MINT_ADDRES, *evm_address, gweis);
         }
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
         // serialize data into account.

@@ -50,14 +50,17 @@ impl EvmRecorderService {
     ) -> Result<(), RecvTimeoutError> {
         let (chain, block) = evm_records_receiver.recv_timeout(Duration::from_secs(1))?;
         let block_header = block.header;
-        debug!("Writing evm block num = {}", block_header.block_number);
+        debug!(
+            "Writing evm block num = {} for chain = {:?}",
+            block_header.block_number, chain
+        );
         blockstore
             .write_evm_block_header(&chain, &block_header)
             .expect("Expected database write to succed");
         for (hash, tx) in block.transactions {
             blockstore
                 .write_evm_transaction(
-                    &chain, 
+                    &chain,
                     block_header.block_number,
                     block_header.native_chain_slot,
                     hash,

@@ -544,7 +544,7 @@ async fn process_tx(
         // Try simulate transaction execution
         bridge
             .rpc_client
-            .send::<Bytes>(RpcRequest::EthCall, json!([rpc_tx, "latest"]))
+            .send::<Bytes>(RpcRequest::EthCall, json!([rpc_tx, "latest"])) //TODO: fix this to vlx_call
             .await
             .map_err(from_client_error)?;
     }
