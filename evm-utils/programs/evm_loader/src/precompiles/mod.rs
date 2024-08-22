@@ -1,22 +1,24 @@
-use evm_state::{
-    executor::{LogEntry, OwnedPrecompile, PrecompileFailure, PrecompileOutput},
-    CallScheme, Context, ExitError, Log, H256,
+use {
+    evm_state::{
+        executor::{LogEntry, OwnedPrecompile, PrecompileFailure, PrecompileOutput},
+        CallScheme, Context, ExitError, Log, H256,
+    },
+    once_cell::sync::Lazy,
+    primitive_types::H160,
+    std::collections::{BTreeMap, HashMap},
 };
-use once_cell::sync::Lazy;
-use primitive_types::H160;
-use std::collections::{BTreeMap, HashMap};
 
 mod abi_parse;
 mod builtins;
 mod compatibility;
 mod errors;
-pub use abi_parse::*;
-pub use builtins::{ETH_TO_VLX_ADDR, ETH_TO_VLX_CODE};
-pub use compatibility::build_precompile_map;
-pub use errors::PrecompileErrors;
-
-use crate::account_structure::AccountStructure;
-use solana_sdk::keyed_account::KeyedAccount;
+use {crate::account_structure::AccountStructure, solana_sdk::keyed_account::KeyedAccount};
+pub use {
+    abi_parse::*,
+    builtins::{ETH_TO_VLX_ADDR, ETH_TO_VLX_CODE},
+    compatibility::build_precompile_map,
+    errors::PrecompileErrors,
+};
 
 pub type Result<T, Err = PrecompileErrors> = std::result::Result<T, Err>;
 type CallResult = Result<(PrecompileOutput, u64, LogEntry)>;
@@ -205,7 +207,7 @@ pub fn entrypoint(
     OwnedPrecompile { precompiles: map }
 }
 
-pub fn filter_native_logs(accounts: AccountStructure<'_>, logs: &mut Vec<Log>) -> Result<()> {
+pub fn post_handle_logs(accounts: AccountStructure<'_>, logs: &mut Vec<Log>) -> Result<()> {
     let tmp_logs = std::mem::take(logs);
     for log in tmp_logs {
         if let Some(c) = NATIVE_CONTRACTS.get(&log.address) {
@@ -220,15 +222,15 @@ pub fn filter_native_logs(accounts: AccountStructure<'_>, logs: &mut Vec<Log>) -
 
 #[cfg(test)]
 mod test {
-    use hex_literal::hex;
-    use primitive_types::U256;
-    use solana_sdk::account::{ReadableAccount, WritableAccount};
-
-    use crate::scope::evm::lamports_to_gwei;
-
-    use super::*;
-    use evm_state::{ExitError, ExitSucceed};
-    use std::str::FromStr;
+    use {
+        super::*,
+        crate::scope::evm::lamports_to_gwei,
+        evm_state::{ExitError, ExitSucceed},
+        hex_literal::hex,
+        primitive_types::U256,
+        solana_sdk::account::{ReadableAccount, WritableAccount},
+        std::str::FromStr,
+    };
 
     #[test]
     fn check_num_builtins() {
@@ -341,7 +343,7 @@ mod test {
 
             let lamports_after_promise = user.lamports().unwrap();
             assert_eq!(lamports_before, lamports_after_promise);
-            filter_native_logs(accounts, &mut logs).unwrap();
+            post_handle_logs(accounts, &mut logs).unwrap();
             assert!(logs.is_empty());
 
             let lamports_after = user.lamports().unwrap();
@@ -392,7 +394,7 @@ mod test {
                 let mut logs = logs.clone();
                 let mut accounts_changed = accounts.clone();
                 accounts_changed.users = &[];
-                filter_native_logs(accounts_changed, &mut logs).unwrap_err();
+                post_handle_logs(accounts_changed, &mut logs).unwrap_err();
             }
             {
                 // no enough token on evm.
@@ -402,7 +404,7 @@ mod test {
                 let lamports = evm.lamports();
                 evm.set_lamports(0);
                 drop(evm);
-                filter_native_logs(accounts_changed, &mut logs).unwrap_err();
+                post_handle_logs(accounts_changed, &mut logs).unwrap_err();
 
                 let mut evm = accounts_changed.evm_mut().unwrap();
                 evm.set_lamports(lamports);

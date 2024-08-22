@@ -1,10 +1,9 @@
-use evm_state::{BlockNum, H256};
-
 pub use rocksdb::Direction as IteratorDirection;
 use {
     crate::blockstore_meta,
     bincode::{deserialize, serialize},
     byteorder::{BigEndian, ByteOrder},
+    evm_state::{BlockNum, H256},
     log::*,
     prost::Message,
     rocksdb::{
@@ -16,6 +15,7 @@ use {
         Options, WriteBatch as RWriteBatch, DB,
     },
     serde::{de::DeserializeOwned, Serialize},
+    solana_program_runtime::evm_executor_context::ChainID,
     solana_runtime::hardened_unpack::UnpackError,
     solana_sdk::{
         clock::{Slot, UnixTimestamp},
@@ -105,6 +105,9 @@ const PERIODIC_COMPACTION_SECONDS: u64 = 60 * 60 * 24;
 const EVM_HEADERS: &str = "evm_headers";
 const EVM_BLOCK_BY_HASH: &str = "evm_block_by_hash";
 const EVM_BLOCK_BY_SLOT: &str = "evm_block_by_slot";
+const EVM_SUBCHAIN_HEADERS: &str = "evm_subchain_headers";
+const EVM_SUBCHAIN_BLOCK_BY_SLOT: &str = "evm_subchain_block_by_slot";
+
 const EVM_TRANSACTIONS: &str = "evm_transactions";
 
 #[derive(Error, Debug)]
@@ -232,11 +235,18 @@ pub mod columns {
     pub struct EvmBlockHeader;
 
     #[derive(Debug)]
+    /// The evm block header.
+    pub struct EvmSubchainBlockHeader;
+
+    #[derive(Debug)]
     /// The evm block header by Hash.
     pub struct EvmHeaderIndexByHash;
 
     #[derive(Debug)]
     pub struct EvmHeaderIndexBySlot;
+
+    #[derive(Debug)]
+    pub struct EvmSubchainHeaderIndexBySlot;
 
     #[derive(Debug)]
     /// The evm transaction with statuses.
@@ -494,6 +504,12 @@ impl Rocks {
             new_cf_descriptor::<EvmHeaderIndexByHash>(options, oldest_slot, oldest_block_num),
             new_cf_descriptor::<EvmHeaderIndexBySlot>(options, oldest_slot, oldest_block_num),
             new_cf_descriptor::<EvmTransactionReceipts>(options, oldest_slot, oldest_block_num),
+            new_cf_descriptor::<EvmSubchainBlockHeader>(options, oldest_slot, oldest_block_num),
+            new_cf_descriptor::<EvmSubchainHeaderIndexBySlot>(
+                options,
+                oldest_slot,
+                oldest_block_num,
+            ),
         ]
     }
 
@@ -526,6 +542,8 @@ impl Rocks {
             EvmTransactionReceipts::NAME,
             EvmHeaderIndexByHash::NAME,
             EvmHeaderIndexBySlot::NAME,
+            EvmSubchainBlockHeader::NAME,
+            EvmSubchainHeaderIndexBySlot::NAME,
         ]
     }
 
@@ -1043,8 +1061,44 @@ impl TypedColumn for columns::OptimisticSlots {
     type Type = blockstore_meta::OptimisticSlotMetaVersioned;
 }
 
-// EVM blockstore
+impl Column for columns::EvmSubchainBlockHeader {
+    type Index = (ChainID, evm_state::BlockNum, Slot);
+    fn key((chain_id, block, slot): (ChainID, evm_state::BlockNum, Slot)) -> Vec<u8> {
+        let mut key = vec![0; 8 + 8 + 8]; // size_of u64 + size_of u64 + size_of Slot
+        BigEndian::write_u64(&mut key[0..8], chain_id);
+        BigEndian::write_u64(&mut key[8..16], block);
+        BigEndian::write_u64(&mut key[16..24], slot);
+        key
+    }
+    fn index(key: &[u8]) -> Self::Index {
+        if key.len() != 24 {
+            Self::as_index(0)
+        } else {
+            let chain_id = BigEndian::read_u64(&key[0..8]);
+            let block = BigEndian::read_u64(&key[8..16]);
+            let slot = BigEndian::read_u64(&key[16..24]);
+            (chain_id, block, slot)
+        }
+    }
 
+    fn primary_index((chain_id, _, _): (ChainID, evm_state::BlockNum, Slot)) -> u64 {
+        chain_id
+    }
+
+    fn as_index(chain_id: u64) -> (ChainID, evm_state::BlockNum, Slot) {
+        (chain_id, 0, 0)
+    }
+}
+
+impl ColumnName for columns::EvmSubchainBlockHeader {
+    const NAME: &'static str = EVM_SUBCHAIN_HEADERS;
+}
+
+impl ProtobufColumn for columns::EvmSubchainBlockHeader {
+    type Type = generated_evm::EvmBlockHeader;
+}
+
+// EVM blockstore
 impl Column for columns::EvmBlockHeader {
     type Index = (evm_state::BlockNum, Option<Slot>);
 
@@ -1138,6 +1192,45 @@ impl ColumnName for columns::EvmHeaderIndexByHash {
 // }
 
 impl ProtobufColumn for columns::EvmHeaderIndexByHash {
+    type Type = evm_state::BlockNum;
+}
+
+impl Column for columns::EvmSubchainHeaderIndexBySlot {
+    type Index = (Slot, ChainID);
+
+    fn key((slot, chain_id): Self::Index) -> Vec<u8> {
+        let mut key = vec![0; 16]; // size_of u64
+        BigEndian::write_u64(&mut key[..8], slot);
+        BigEndian::write_u64(&mut key[8..16], chain_id);
+        key
+    }
+
+    fn index(key: &[u8]) -> Self::Index {
+        if key.len() != 16 {
+            return (0, 0);
+        }
+        let slot = BigEndian::read_u64(&key[..8]);
+        let chain_id = BigEndian::read_u64(&key[8..16]);
+        (slot, chain_id)
+    }
+
+    fn primary_index(index: Self::Index) -> u64 {
+        index.0
+    }
+
+    fn as_index(primary: u64) -> Self::Index {
+        (primary, 0)
+    }
+
+    fn slot(index: Self::Index) -> Slot {
+        index.0
+    }
+}
+impl ColumnName for columns::EvmSubchainHeaderIndexBySlot {
+    const NAME: &'static str = EVM_SUBCHAIN_BLOCK_BY_SLOT;
+}
+
+impl ProtobufColumn for columns::EvmSubchainHeaderIndexBySlot {
     type Type = evm_state::BlockNum;
 }
 
@@ -1792,7 +1885,9 @@ fn get_cf_options<C: 'static + Column + ColumnName>(
     }
 
     if !disable_auto_compactions && !should_exclude_from_compaction(C::NAME) {
-        if C::NAME == columns::EvmBlockHeader::NAME {
+        if C::NAME == columns::EvmBlockHeader::NAME
+            || C::NAME == columns::EvmSubchainBlockHeader::NAME
+        {
             cf_options.set_compaction_filter_factory(PurgedEvmBlockFilterFactory::<C> {
                 oldest_block: oldest_block_num.clone(),
                 name: CString::new(format!("purged_evm_block_filter_factory({})", C::NAME))

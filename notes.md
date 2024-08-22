@@ -13,8 +13,7 @@
 - In core - patch -> Multi patch (Option<EvmPatch> -> HashMap<Chainid, EvmPatch>) +
   
   **1 day**
-
-- in core - multi sysvar -> blockhashes (\* KVS or SYSVARs or EVM_STATE_ACCOUNT). (on bank.freeze() -> for subchain in subchains{}) +
+landingSYSVARs or EVM_STATE_ACCOUNT). (on bank.freeze() -> for subchain in subchains{}) +
   
   **1 week**
 <!--
@@ -126,12 +125,15 @@ TODO for this week:
 1. Store block in blockstore
 2. (optional) store block in evm archive/bigtable
 3. last-roots for subchain collecting
-4. blockhashes for subchain changing
-5. feature non activating
-6. Precompile ??
-7. Tools TODO fixes
-8. CHain id limit 0x56 prefix (and top100 blacklist)
-9. Mixed fee payer model
+4. + blockhashes for subchain changing 
+5. * feature non activating
+6. * SubchainConfig::validate() - check if chain_id in blacklist, not main_chain_id, is prefixed with 0x56, strings are limited by length.
+7. + Mixed fee payer model - 
+8. manager - fix inputs for chain_id and mint
 
 tests:
 Todo: Add test for register slot with subchains
+
+1. Min gas_price in config == FOR ALEX
+2. addr bridge in config == FOR ALEX
+3. Reverted transaction processing == FOR ALEX

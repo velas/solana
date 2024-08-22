@@ -1,16 +1,16 @@
-use std::{ops::Range, sync::Arc};
-
-use async_trait::async_trait;
-use evm_state::{BlockNum, H256};
-use solana_ledger::{blockstore::Blockstore, blockstore_db::BlockstoreError};
-
-use super::{error::evm_height, EvmHeightIndex, ReadRange};
+use {
+    super::{error::evm_height, EvmHeightIndex, ReadRange},
+    async_trait::async_trait,
+    evm_state::{BlockNum, H256},
+    solana_ledger::{blockstore::Blockstore, blockstore_db::BlockstoreError},
+    std::{ops::Range, sync::Arc},
+};
 
 #[async_trait]
 impl ReadRange for Arc<Blockstore> {
     async fn get(&self) -> Result<std::ops::Range<BlockNum>, evm_height::Error> {
-        let start = self.get_first_available_evm_block()?;
-        let end = self.get_last_available_evm_block()?;
+        let start = self.get_first_available_evm_block(None)?;
+        let end = self.get_last_available_evm_block(None)?;
 
         let end = end.ok_or(evm_height::Error::NoLast)?;
 
@@ -28,7 +28,7 @@ impl EvmHeightIndex for Arc<Blockstore> {
             return Err(evm_height::Error::ForbidZero);
         }
 
-        let result = self.get_evm_block(block_num);
+        let result = self.get_evm_block(None, block_num);
         let (block, confirmed) = match result {
             Ok((block, confirmed)) => (block, confirmed),
             Err(BlockstoreError::SlotCleanedUp) => {

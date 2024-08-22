@@ -760,6 +760,11 @@ impl<'a> InvokeContext<'a> {
         Ok(())
     }
 
+    pub fn get_slot_from_evm_context(&self) -> Option<u64> {
+        self.evm_executor_context.as_ref()
+            .map(|ctx|ctx.get_slot())
+    }
+
     /// Helper to prepare for process_instruction()
     #[allow(clippy::type_complexity)]
     pub fn prepare_instruction(

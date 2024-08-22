@@ -1,18 +1,20 @@
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
-use solana_ledger::blockstore::Blockstore;
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
+use {
+    crossbeam_channel::{Receiver, RecvTimeoutError, Sender},
+    evm_state::Block,
+    solana_ledger::blockstore::Blockstore,
+    solana_program_runtime::evm_executor_context::Chain,
+    std::{
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+        thread::{self, Builder, JoinHandle},
+        time::Duration,
     },
-    thread::{self, Builder, JoinHandle},
-    time::Duration,
 };
 
-use evm_state::Block;
-
-pub type EvmRecorderReceiver = Receiver<Block>;
-pub type EvmRecorderSender = Sender<Block>;
+pub type EvmRecorderReceiver = Receiver<(Chain, Block)>;
+pub type EvmRecorderSender = Sender<(Chain, Block)>;
 
 pub struct EvmRecorderService {
     thread_hdl: JoinHandle<()>,
@@ -46,15 +48,16 @@ impl EvmRecorderService {
         evm_records_receiver: &EvmRecorderReceiver,
         blockstore: &Arc<Blockstore>,
     ) -> Result<(), RecvTimeoutError> {
-        let block = evm_records_receiver.recv_timeout(Duration::from_secs(1))?;
+        let (chain, block) = evm_records_receiver.recv_timeout(Duration::from_secs(1))?;
         let block_header = block.header;
         debug!("Writing evm block num = {}", block_header.block_number);
         blockstore
-            .write_evm_block_header(&block_header)
+            .write_evm_block_header(&chain, &block_header)
             .expect("Expected database write to succed");
         for (hash, tx) in block.transactions {
             blockstore
                 .write_evm_transaction(
+                    &chain, 
                     block_header.block_number,
                     block_header.native_chain_slot,
                     hash,

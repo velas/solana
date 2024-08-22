@@ -19,7 +19,10 @@ use {
     },
     solana_measure::measure::Measure,
     solana_metrics::{datapoint_error, inc_new_counter_debug},
-    solana_program_runtime::timings::{ExecuteTimingType, ExecuteTimings},
+    solana_program_runtime::{
+        evm_executor_context::Chain,
+        timings::{ExecuteTimingType, ExecuteTimings},
+    },
     solana_rayon_threadlimit::get_thread_count,
     solana_runtime::{
         accounts_background_service::DroppedSlotsReceiver,
@@ -1475,7 +1478,7 @@ fn process_single_slot(
         bank,
         evm_block_recorder_sender,
         evm_state_recorder_sender,
-        |_| {},
+        |_, _| {},
     );
 
     Ok(())
@@ -1485,14 +1488,13 @@ pub fn record_evm_block(
     bank: &Bank,
     evm_block_recorder_sender: Option<&EvmRecorderSender>,
     evm_state_recorder_sender: Option<&EvmStateRecorderSender>,
-    handle_block: impl Fn(&evm_state::Block),
+    handle_block: impl Fn(&Chain, &evm_state::Block),
 ) {
     if let Some(evm_block_recorder_sender) = evm_block_recorder_sender {
-        let block = bank.evm_block();
-        if let Some(block) = block {
-            handle_block(&block);
+        for (chain, block) in bank.evm_blocks() {
+            handle_block(&chain, &block);
             evm_block_recorder_sender
-                .send(block)
+                .send((chain, block))
                 .unwrap_or_else(|err| warn!("evm_block_recorder_sender failed: {:?}", err));
         }
     }

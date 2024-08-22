@@ -9,6 +9,7 @@ use {
     },
     crossbeam_channel::unbounded,
     log::*,
+    solana_program_runtime::evm_executor_context::Chain,
     solana_runtime::{
         accounts_background_service::DroppedSlotsReceiver,
         accounts_update_notifier_interface::AccountsUpdateNotifier,
@@ -38,7 +39,7 @@ use {
 };
 
 pub type EvmStateRecorderSender = crossbeam_channel::Sender<(H256, ChangedState)>;
-pub type EvmRecorderSender = crossbeam_channel::Sender<evm_state::Block>;
+pub type EvmRecorderSender = crossbeam_channel::Sender<(Chain, evm_state::Block)>;
 
 /// Load the banks via genesis or a snapshot then processes all full blocks in blockstore
 ///

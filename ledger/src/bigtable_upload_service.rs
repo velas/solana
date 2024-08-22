@@ -122,23 +122,22 @@ impl BigTableUploadService {
             }
             // start to process evm blocks, only if something changed on native chain
             let end_block = blockstore
-                .get_last_available_evm_block()
+                .get_last_available_evm_block(None)
                 .unwrap_or_default()
                 .unwrap_or_default();
             if end_block <= start_evm_block {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 continue;
             }
-            let result =
-                runtime.block_on(bigtable_upload::upload_evm_confirmed_blocks(
-                    blockstore.clone(),
-                    bigtable_ledger_storage.clone(),
-                    start_evm_block,
-                    Some(end_block),
-                    false,
-                    false,
-                    exit.clone(),
-                ));
+            let result = runtime.block_on(bigtable_upload::upload_evm_confirmed_blocks(
+                blockstore.clone(),
+                bigtable_ledger_storage.clone(),
+                start_evm_block,
+                Some(end_block),
+                false,
+                false,
+                exit.clone(),
+            ));
 
             match result {
                 Ok(not_confirmed_blocks) => {

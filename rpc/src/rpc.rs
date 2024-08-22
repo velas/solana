@@ -1,6 +1,5 @@
 //! The `rpc` module implements the Solana RPC interface.
 
-use tracing_attributes::instrument;
 use {
     crate::{
         max_slots::MaxSlots, optimistically_confirmed_bank_tracker::OptimisticallyConfirmedBank,
@@ -9,6 +8,7 @@ use {
     bincode::{config::Options, serialize},
     crossbeam_channel::{unbounded, Receiver, Sender},
     dashmap::DashMap,
+    evm_rpc::ChainID,
     jsonrpc_core::{futures::future, types::error, BoxFuture, Error, Result},
     jsonrpc_derive::rpc,
     serde::{Deserialize, Serialize},
@@ -45,7 +45,7 @@ use {
     solana_perf::packet::PACKET_DATA_SIZE,
     solana_runtime::{
         accounts::AccountAddressFilter,
-        accounts_index::{AccountIndex, AccountSecondaryIndexes, IndexKey, ScanConfig},
+        accounts_index::{AccountIndex, AccountSecondaryIndexes, IndexKey, ScanConfig, ScanResult},
         bank::{Bank, TransactionSimulationResult},
         bank_forks::BankForks,
         commitment::{BlockCommitmentArray, BlockCommitmentCache, CommitmentSlots},
@@ -109,11 +109,10 @@ use {
         },
         time::{Duration, Instant},
     },
+    tracing_attributes::instrument,
+    velas_account_program::{VelasAccountType, ACCOUNT_LEN as VELAS_ACCOUNT_SIZE},
+    velas_relying_party_program::RelyingPartyData,
 };
-
-use solana_runtime::accounts_index::ScanResult;
-use velas_account_program::{VelasAccountType, ACCOUNT_LEN as VELAS_ACCOUNT_SIZE};
-use velas_relying_party_program::RelyingPartyData;
 
 type RpcCustomResult<T> = std::result::Result<T, RpcCustomError>;
 
@@ -2298,6 +2297,7 @@ impl JsonRpcRequestProcessor {
     #[instrument(skip(self))]
     pub async fn get_evm_blocks_by_ids(
         &self,
+        chain: Option<ChainID>,
         starting_block: evm_state::BlockNum,
         ending_block: evm_state::BlockNum,
     ) -> solana_ledger::blockstore_db::Result<Vec<evm_state::Block>> {
@@ -2311,7 +2311,7 @@ impl JsonRpcRequestProcessor {
         let mut blockstore_request_time = Duration::from_millis(0);
         let mut blockstore_request = Instant::now();
 
-        let iter = self.blockstore.evm_blocks_iterator(starting_block)?;
+        let iter = self.blockstore.evm_blocks_iterator(chain, starting_block)?;
         let mut blocks_from_db: Vec<_> = iter
             .take_while(|((block_num, _slot), _header)| *block_num <= ending_block)
             .map(|((block_num, _slot), _header)| block_num)
@@ -2321,7 +2321,7 @@ impl JsonRpcRequestProcessor {
         let mut missing_block = starting_block;
         let mut blocks = Vec::new();
         for block_num in &blocks_from_db {
-            let block = self.blockstore.get_evm_block(*block_num).ok();
+            let block = self.blockstore.get_evm_block(chain, *block_num).ok();
 
             if block.is_none() {
                 // confirmed block is missing, skip this block
@@ -2382,6 +2382,7 @@ impl JsonRpcRequestProcessor {
     #[instrument(skip(self))]
     pub async fn filter_logs(
         &self,
+        chain: Option<ChainID>,
         filter: evm_state::LogFilter,
     ) -> solana_ledger::blockstore_db::Result<Vec<evm_state::LogWithLocation>> {
         info!(target: "evm","Starting search for logs with filter = {:?}", filter);
@@ -2393,7 +2394,7 @@ impl JsonRpcRequestProcessor {
 
         let mut logs = Vec::new();
         for block in self
-            .get_evm_blocks_by_ids(filter.from_block, filter.to_block)
+            .get_evm_blocks_by_ids(chain, filter.from_block, filter.to_block)
             .await?
         {
             let filter_request = Instant::now();
@@ -2406,11 +2407,15 @@ impl JsonRpcRequestProcessor {
     }
 
     #[instrument(skip(self))]
-    pub async fn get_first_available_evm_block(&self) -> u64 {
+    pub async fn get_first_available_evm_block(&self, chain: Option<ChainID>) -> u64 {
         let block = self
             .blockstore
-            .get_first_available_evm_block()
+            .get_first_available_evm_block(chain)
             .unwrap_or_default();
+
+        if chain.is_some() {
+            return block;
+        }
 
         if let Some(bigtable_ledger_storage) = &self.bigtable_ledger_storage {
             let bigtable_block = bigtable_ledger_storage
@@ -2427,9 +2432,9 @@ impl JsonRpcRequestProcessor {
     }
 
     #[instrument(skip(self))]
-    pub fn get_last_available_evm_block(&self) -> Option<u64> {
+    pub fn get_last_available_evm_block(&self, chain: Option<ChainID>) -> Option<u64> {
         self.blockstore
-            .get_last_available_evm_block()
+            .get_last_available_evm_block(chain)
             .unwrap_or(None)
     }
 
@@ -2437,9 +2442,9 @@ impl JsonRpcRequestProcessor {
     /// Get last evm block which has respective native chain block rooted
 
     #[instrument(skip(self))]
-    pub fn get_last_confirmed_evm_block(&self) -> Option<u64> {
+    pub fn get_last_confirmed_evm_block(&self, chain: Option<ChainID>) -> Option<u64> {
         self.blockstore
-            .evm_blocks_reverse_iterator()
+            .evm_blocks_reverse_iterator(chain)
             .ok()?
             .find(|(_, header)| self.blockstore.is_root(header.native_chain_slot))
             .map(|((block_num, _), _)| block_num)
@@ -2475,16 +2480,18 @@ impl JsonRpcRequestProcessor {
     #[instrument(skip(self))]
     pub async fn get_evm_block_by_id(
         &self,
+        chain: Option<ChainID>,
         id: evm_state::BlockNum,
     ) -> Option<(evm_state::Block, bool)> {
-        let block = self.blockstore.get_evm_block(id).ok();
+        let block = self.blockstore.get_evm_block(chain, id).ok();
         if block.is_some() {
             return block;
         }
 
-        let last_evm_block = self.get_last_available_evm_block();
-        if last_evm_block.is_none()
-            || matches!(last_evm_block, Some(last_evm_block) if id <= last_evm_block)
+        let last_evm_block = self.get_last_available_evm_block(chain);
+        if chain.is_none()
+            && (last_evm_block.is_none()
+                || matches!(last_evm_block, Some(last_evm_block) if id <= last_evm_block))
         {
             if let Some(bigtable_ledger_storage) = &self.bigtable_ledger_storage {
                 let bigtable_block = bigtable_ledger_storage

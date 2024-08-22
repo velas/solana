@@ -5,7 +5,7 @@ use {
     log::debug,
     solana_measure::measure::Measure,
     solana_program_runtime::evm_executor_context::{
-        BlockHashEvm, EvmBank, EvmExecutorContext, EvmExecutorContextType, PatchStrategy,
+        BlockHashEvm, Chain, EvmBank, EvmExecutorContext, EvmExecutorContextType, PatchStrategy,
         MAX_EVM_BLOCKHASHES,
     },
     solana_sdk::{
@@ -24,8 +24,20 @@ impl Bank {
         &self.evm
     }
 
-    pub fn evm_block(&self) -> Option<evm_state::Block> {
-        self.evm.main_chain().state().get_block()
+    pub fn evm_blocks(&self) -> Vec<(Chain, evm_state::Block)> {
+        self.evm
+            .main_chain()
+            .state()
+            .get_block()
+            .map(|block| (None, block))
+            .into_iter()
+            .chain(
+                self.evm
+                    .side_chains()
+                    .iter()
+                    .filter_map(|s| s.value().evm_state.get_block().map(|b| (Some(*s.key()), b))),
+            )
+            .collect()
     }
 
     pub fn evm_state_change(&self) -> Option<(evm_state::H256, evm_state::ChangedState)> {
@@ -121,11 +133,6 @@ impl Bank {
 
             let subchain_roots = self.evm.subchain_roots();
 
-            crate::bank::evm::debug_evm_roots(
-                self.evm.main_chain().state().kvs().clone(),
-                self.evm.main_chain().state().last_root(),
-                &subchain_roots,
-            );
             // TODO: feature_subchain
             self.evm
                 .main_chain()

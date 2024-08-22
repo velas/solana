@@ -264,7 +264,7 @@ pub struct Cmd {
 const CHAIN_ID_PREFIX: u64 = 0x56; // V in hex
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct ChainID(u64);
+pub struct ChainID(u64);
 
 impl ChainID {
     fn to_u64_prefixed(&self) -> u64 {

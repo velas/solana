@@ -573,8 +573,6 @@ where
         .map(|(_k, v)| v.last_root())
         .collect::<Vec<_>>();
 
-    crate::bank::evm::debug_evm_roots(storage, evm_state.last_root(), &subchain_roots);
-
     evm_state
         .kvs()
         .cleanup_slots(
