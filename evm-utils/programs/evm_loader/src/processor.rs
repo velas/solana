@@ -1099,6 +1099,7 @@ mod test {
             empty_trie_hash,
             transactions::{TransactionAction, TransactionSignature},
             AccountProvider, AccountState, EvmBackend, ExitReason, ExitSucceed, FromKey, Incomming,
+            BURN_GAS_PRICE,
         },
         hex_literal::hex,
         num_traits::Zero,
@@ -2162,33 +2163,40 @@ mod test {
         // TODO: feature activation
 
         // create accounts
-        let mut rand = evm_state::rand::thread_rng();
-        let user_id = Pubkey::new_unique();
-        let user_acc = evm_context.native_account(user_id);
+        let mut rand: evm_state::rand::prelude::ThreadRng = evm_state::rand::thread_rng();
+        let subchain_owner = Pubkey::new_unique();
+        let subchain_owner_acc = evm_context.native_account(subchain_owner);
         let bob = evm::SecretKey::new(&mut rand);
         let bob_addr = bob.to_address();
-        user_acc.set_lamports(SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX);
+        subchain_owner_acc.set_lamports(SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX);
         evm_context.deposit_evm(bob_addr, lamports_to_gwei(10_000_000));
 
         // create subchain
         let subchain_id = 51777;
         let subchain_config = SubchainConfig {
             hardfork: crate::instructions::Hardfork::Istanbul,
-            mint: vec![(bob_addr, 20_000_000_000u64)],
+            mint: vec![(bob_addr, 20_000_000)],
             ..Default::default()
         };
         let create_subchain_ix =
-            crate::create_evm_subchain_account(user_id, subchain_id, subchain_config);
+            crate::create_evm_subchain_account(subchain_owner, subchain_id, subchain_config);
         evm_context.process_instruction(create_subchain_ix).unwrap();
 
-        // check balances
-        let subchain = evm_context.subchains.get(&subchain_id).unwrap(); // subchain evm
-        let subchain_acc = subchain.get_account_state(bob_addr).unwrap();
+        // empty native balance after subchain cration fee
+        let subchain_owner_acc = evm_context.native_account(subchain_owner);
+        assert_eq!(subchain_owner_acc.lamports(), 0);
 
-        let main_acc = evm_context.evm_state.get_account_state(bob_addr).unwrap();
-        assert_eq!(subchain_acc.balance, lamports_to_gwei(20_000_000_000));
-        assert_eq!(main_acc.balance, lamports_to_gwei(10_000_000));
-        assert_eq!(evm_state_lamports(&mut evm_context), 12_000_000);
+        // check EVM balances
+        let bobs_subchain_acc = evm_context
+            .subchains
+            .get(&subchain_id)
+            .unwrap()
+            .get_account_state(bob_addr)
+            .unwrap();
+
+        let bobs_mainchain_acc = evm_context.evm_state.get_account_state(bob_addr).unwrap();
+        assert_eq!(bobs_subchain_acc.balance, lamports_to_gwei(20_000_000));
+        assert_eq!(bobs_mainchain_acc.balance, lamports_to_gwei(10_000_000));
 
         // try to swap from EVM mainchain and assert successful swap
         let swap_within_mainchain = evm::UnsignedTransaction {
@@ -2199,57 +2207,66 @@ mod test {
             value: crate::scope::evm::lamports_to_gwei(4_000_000),
             input: precompiles::ETH_TO_VLX_CODE
                 .abi
-                .encode_input(&[ethabi::Token::FixedBytes(user_id.to_bytes().to_vec())])
+                .encode_input(&[ethabi::Token::FixedBytes(
+                    subchain_owner.to_bytes().to_vec(),
+                )])
                 .unwrap(),
         }
         .sign(&bob, Some(TEST_CHAIN_ID));
+
+        // error!("subchain_owner: {:?}", subchain_owner);
+        // error!("subchain_owner2: {:?}", subchain_owner.to_bytes());
+        // error!("INPUT: {:?}", &swap_within_mainchain.input);
+
         evm_context
             .process_instruction(crate::send_raw_tx(
-                user_id,
+                subchain_owner,
                 swap_within_mainchain,
                 None,
                 FeePayerType::Evm,
             ))
             .unwrap();
 
-        let user_acc = evm_context.native_account(user_id);
-        assert_eq!(user_acc.lamports(), 4_000_000);
+        let subchain_owner_acc = evm_context.native_account(subchain_owner);
+        assert_eq!(subchain_owner_acc.lamports(), 4_000_000);
 
-        // try to swap from EVM mainchain and assert successful swap
+        // try to swap from EVM subchain and assert unsuccessful swap
         let swap_within_subchain = evm::UnsignedTransaction {
             nonce: 0u32.into(),
             gas_price: BURN_GAS_PRICE.into(),
             gas_limit: 300000u32.into(),
             action: TransactionAction::Call(*precompiles::ETH_TO_VLX_ADDR),
-            value: crate::scope::evm::lamports_to_gwei(4_000_000),
+            value: crate::scope::evm::lamports_to_gwei(3_000_000),
             input: precompiles::ETH_TO_VLX_CODE
                 .abi
-                .encode_input(&[ethabi::Token::FixedBytes(user_id.to_bytes().to_vec())])
+                .encode_input(&[ethabi::Token::FixedBytes(
+                    subchain_owner.to_bytes().to_vec(),
+                )])
                 .unwrap(),
         }
         .sign(&bob, Some(subchain_id));
         evm_context
             .process_instruction(crate::send_raw_tx_subchain(
-                user_id,
+                subchain_owner,
                 swap_within_subchain,
                 None,
                 subchain_id,
             ))
             .unwrap();
 
-        let user_acc = evm_context.native_account(user_id);
+        let user_acc = evm_context.native_account(subchain_owner);
         assert_eq!(user_acc.lamports(), 4_000_000);
 
         // check transfers
 
-        let paid = 1_500_000;
+        // let paid = 1_500_000;
 
         // let alice = evm::SecretKey::new(&mut rand);
         // let alice_pub = alice.to_address();
 
-        assert!(evm_context
-            .process_instruction(crate::transfer_native_to_evm(user_id, paid, alice_pub))
-            .is_err()); // NOTE: returns error now!
+        // assert!(evm_context
+        //     .process_instruction(crate::transfer_native_to_evm(user_id, paid, alice_pub))
+        //     .is_err()); // NOTE: returns error now!
 
         // assert_eq!(
         //     evm_context

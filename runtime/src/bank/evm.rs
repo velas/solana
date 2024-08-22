@@ -1076,4 +1076,89 @@ mod evmtests {
 
         assert_eq!(new_hash, hash_after);
     }
+
+    #[test]
+    fn swap_within_subchain() {
+        use {
+            solana_evm_loader_program::{
+                instructions::{EvmInstruction, ExecuteTransaction, FeePayerType},
+                precompiles,
+                scope::{evm, solana},
+            },
+            solana_sdk::instruction::AccountMeta,
+        };
+
+        solana_logger::setup_with("trace");
+        let tx = solana_evm_loader_program::processor::dummy_call(0).0;
+        let receiver = tx.caller().unwrap();
+        let (genesis_config, subchain_owner) = create_genesis_config(LAMPORTS_PER_VLX * 1_000_000);
+        let mut bank = Bank::new_for_tests(&genesis_config);
+
+        bank.activate_feature(&feature_set::velas::native_swap_in_evm_history::id());
+        bank.activate_feature(&feature_set::velas::evm_new_error_handling::id());
+        bank.activate_feature(&feature_set::velas::evm_instruction_borsh_serialization::id());
+        // bank.activate_feature(&feature_set::velas::evm_cross_execution::id());
+        let recent_hash = genesis_config.hash();
+
+        let subchain_id = 51777;
+
+        let init_subchain_tx = create_subchain_with_preseed(
+            &subchain_owner,
+            receiver,
+            subchain_id,
+            recent_hash,
+            20000,
+        );
+
+        bank.process_transaction(&init_subchain_tx).unwrap();
+
+        let state = match *bank.evm.chain_state(subchain_id).state() {
+            EvmState::Incomming(ref i) => i.get_account_state(receiver).unwrap_or_default(),
+            EvmState::Committed(_) => panic!(),
+        };
+
+        let mut rand = evm_state::rand::thread_rng();
+        let bob = evm::SecretKey::new(&mut rand);
+        let bob_addr = bob.to_address();
+
+        let swap_within_subchain = {
+            let input = [177, 214, 146, 122]
+                .into_iter()
+                .chain(subchain_owner.pubkey().to_bytes())
+                .collect();
+
+            let evm_tx = evm::UnsignedTransaction {
+                nonce: 0u32.into(),
+                gas_price: evm_state::BURN_GAS_PRICE.into(),
+                gas_limit: 300000u32.into(),
+                action: evm_state::TransactionAction::Call(*precompiles::ETH_TO_VLX_ADDR),
+                value: lamports_to_gwei(3_000_000),
+                input,
+            }
+            .sign(&bob, Some(subchain_id));
+
+            let ix = solana_evm_loader_program::create_evm_instruction_with_borsh(
+                solana_sdk::evm_loader::ID,
+                &EvmInstruction::ExecuteTransaction {
+                    tx: ExecuteTransaction::Signed { tx: Some(evm_tx) },
+                    fee_type: FeePayerType::Native,
+                },
+                vec![
+                    AccountMeta::new(solana::evm_state::ID, false),
+                    AccountMeta::new(subchain_owner.pubkey(), true),
+                ],
+            );
+
+            let message = Message::new(&[ix], Some(&subchain_owner.pubkey()));
+
+            let recent_hash = bank.last_blockhash();
+            Transaction::new(&[&subchain_owner], message, recent_hash)
+        };
+
+        bank.process_transaction(&swap_within_subchain).unwrap();
+
+        println!("{receiver}");
+
+        println!("{state:?}");
+    }
 }

@@ -115,17 +115,6 @@ pub enum PrecompileSet {
     VelasNext,
 }
 
-// TODO: do type alias
-type Precompile = Box<
-    dyn for<'a, 'b> Fn(
-        &'a [u8],
-        Option<u64>,
-        Option<CallScheme>,
-        &'b Context,
-        bool,
-    ) -> Result<(PrecompileOutput, u64, LogEntry), PrecompileFailure>,
->;
-
 pub fn entrypoint(
     accounts: AccountStructure,
     activate_precompile: PrecompileSet,
