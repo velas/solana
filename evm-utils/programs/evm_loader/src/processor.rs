@@ -2,6 +2,7 @@ use {
     super::{
         account_structure::AccountStructure,
         error::EvmError,
+        evm_state_subchain_account,
         instructions::{
             EvmBigTransaction, EvmInstruction, EvmSubChain, ExecuteTransaction, FeePayerType,
             SubchainConfig, EVM_INSTRUCTION_BORSH_PREFIX,
@@ -1069,10 +1070,7 @@ impl EvmProcessor {
             return Err(EvmError::InvalidSubchainConfig);
         }
 
-        let (evm_subchain_state_pda, _bump_seed) = Pubkey::find_program_address(
-            &[b"evm_subchain", &subchain_id.to_be_bytes()],
-            &solana_sdk::evm_loader::ID,
-        );
+        let evm_subchain_state_pda = evm_state_subchain_account(subchain_id);
 
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
 
@@ -1406,7 +1404,7 @@ mod test {
             }
         }
 
-        fn deposit_evm(&mut self, evm_addr: evm_state::Address, amount: evm_state::U256) {
+        fn deposit_evm(&mut self, recipient: evm_state::Address, gweis: evm_state::U256) {
             let mut account_state = self
                 .evm_state
                 .get_account_state(recipient)

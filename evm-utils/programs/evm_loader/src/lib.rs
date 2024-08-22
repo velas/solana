@@ -107,8 +107,10 @@ pub fn send_raw_tx(
 }
 
 pub fn evm_state_subchain_account(chain_id: ChainID) -> solana::Address {
+    const EVM_SUBCHAIN_SEED_PREFIX: &[u8] = b"evm_subchain";
+
     let (evm_subchain_state_pda, _bump_seed) = solana::Address::find_program_address(
-        &[b"evm_subchain", &chain_id.to_be_bytes()],
+        &[EVM_SUBCHAIN_SEED_PREFIX, &chain_id.to_be_bytes()],
         &solana_sdk::evm_loader::ID,
     );
     evm_subchain_state_pda
@@ -118,10 +120,7 @@ pub fn create_evm_subchain_account(
     chain_id: ChainID,
     config: SubchainConfig,
 ) -> solana::Instruction {
-    let (evm_subchain_state_pda, _bump_seed) = solana::Address::find_program_address(
-        &[b"evm_subchain", &chain_id.to_be_bytes()],
-        &solana_sdk::evm_loader::ID,
-    );
+    let evm_subchain_state_pda = evm_state_subchain_account(chain_id);
     let account_metas = vec![
         AccountMeta::new(solana::evm_state::ID, false),
         AccountMeta::new(evm_subchain_state_pda, false),
@@ -142,10 +141,7 @@ pub fn send_raw_tx_subchain(
     gas_collector: Option<solana::Address>,
     chain_id: ChainID,
 ) -> solana::Instruction {
-    let (evm_subchain_state_pda, _bump_seed) = solana::Address::find_program_address(
-        &[b"evm_subchain", &chain_id.to_be_bytes()],
-        &solana_sdk::evm_loader::ID,
-    );
+    let evm_subchain_state_pda = evm_state_subchain_account(chain_id);
     let mut account_metas = vec![
         AccountMeta::new(solana::evm_state::ID, false),
         AccountMeta::new(evm_subchain_state_pda, false),

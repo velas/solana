@@ -1026,6 +1026,18 @@ mod evmtests {
     fn send_evm_subchain_tx() {
         // Add check that after creating, and sending tx subchain evm_state is changed but it last_root is not.
         todo!();
+        // 1. create bank
+        // get last_root of main and sub_chain
+        // 2. create subchain account
+        // 3. check_roots()  == 1
+        // 4. bank.freeze() bank = bank.from_parent()
+        // 5. check_roots()  != 3
+        // 6. let prev = get_evm_state()
+        // 7. send_subchain_tx()
+        // 8. check_evm_state(prev)
+        // 9. check_roots() == 5
+        // 10. bank.freeze()
+        // 11. check_roots() != 9
     }
     #[test]
     fn create_evm_subchain_regular() {
@@ -1110,8 +1122,8 @@ mod evmtests {
         let alice = Pubkey::new_unique();
         let bob = evm::SecretKey::new(&mut rand);
         let bob_addr = bob.to_address();
-        let mint_lamports = LAMPORTS_PER_VLX * 1_001_000;
         let subchain_creation_fee = SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX;
+        let mint_lamports = subchain_creation_fee + 1_000 * LAMPORTS_PER_VLX;
         let (genesis_config, subchain_owner) = create_genesis_config(mint_lamports);
         let mut bank = Bank::new_for_tests(&genesis_config);
         let subchain_id = 0x5677;
@@ -1119,8 +1131,7 @@ mod evmtests {
         bank.activate_feature(&feature_set::velas::native_swap_in_evm_history::id());
         bank.activate_feature(&feature_set::velas::evm_new_error_handling::id());
         bank.activate_feature(&feature_set::velas::evm_instruction_borsh_serialization::id());
-        // TODO: feature
-        // bank.activate_feature(&feature_set::velas::evm_cross_execution::id());
+        bank.activate_feature(&feature_set::velas::evm_subchain::id());
 
         assert_eq!(bank.get_balance(&subchain_owner.pubkey()), mint_lamports);
         assert_eq!(bank.get_balance(&alice), 0);
@@ -1137,6 +1148,7 @@ mod evmtests {
         );
 
         bank.process_transaction(&init_subchain_tx).unwrap();
+        bank.freeze();
         let bank = Bank::new_from_parent(&Arc::new(bank), &Pubkey::default(), 1);
 
         assert_eq!(
@@ -1187,6 +1199,7 @@ mod evmtests {
         };
 
         bank.process_transaction(&swap_within_subchain).unwrap();
+        bank.freeze();
         let bank = Bank::new_from_parent(&Arc::new(bank), &Pubkey::default(), 2);
 
         assert_eq!(bank.get_balance(&alice), 0);
