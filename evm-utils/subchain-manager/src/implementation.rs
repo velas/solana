@@ -1,11 +1,9 @@
 use {
-    crate::ChainID,
     solana_client::{
         client_error::ClientErrorKind,
-        rpc_config::RpcSendTransactionConfig,
         rpc_request::{RpcError, RpcResponseErrorData},
     },
-    solana_sdk::signer::{keypair, Signer},
+    solana_sdk::signer::Signer,
     std::io::{Read, Write},
 };
 

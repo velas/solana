@@ -45,9 +45,10 @@ pub const UNUSED_DEFAULT: u64 = 1024;
 pub const EVM_GENESIS: &str = "evm-state-genesis";
 
 // Dont load to memory accounts, more specified count
-use evm_state::{Storage, MAX_IN_HEAP_EVM_ACCOUNTS_BYTES};
-
-use self::evm_genesis::{AccountPair, EvmAccountDumpExtractor};
+use {
+    self::evm_genesis::{AccountPair, EvmAccountDumpExtractor},
+    evm_state::{Storage, MAX_IN_HEAP_EVM_ACCOUNTS_BYTES},
+};
 
 // The order can't align with release lifecycle only to remain ABI-compatible...
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, AbiEnumVisitor, AbiExample)]
@@ -387,7 +388,9 @@ impl fmt::Display for GenesisConfig {
              Rewards pool: {:#?}\n\
              EVM chain id: {}\n\
              ",
-            Utc.timestamp(self.creation_time, 0).to_rfc3339(),
+            Utc.timestamp_opt(self.creation_time, 0)
+                .unwrap()
+                .to_rfc3339(),
             self.cluster_type,
             self.hash(),
             compute_shred_version(&self.hash(), None),
@@ -422,23 +425,26 @@ impl fmt::Display for GenesisConfig {
 }
 
 pub mod evm_genesis {
-    use evm_rpc::Bytes;
-    use evm_state::{MemoryAccount, H160, H256, U256};
-
-    use serde::{de, Deserialize, Serialize};
-    use serde_json::de::Read;
-    use serde_json::{de::IoRead, Deserializer};
-    use sha3::{Digest, Keccak256};
-    use std::fs::File;
-    use std::io::{BufRead, BufReader, Error, ErrorKind};
-    use std::path::Path;
-    use std::{collections::BTreeMap, io::Write};
-
-    use std::fs;
-    use std::path::PathBuf;
-
-    pub use geth::GethAccountExtractor;
-    pub use open_ethereum::{generate_evm_state_json, OpenEthereumAccountExtractor};
+    use {
+        evm_rpc::Bytes,
+        evm_state::{MemoryAccount, H160, H256, U256},
+        serde::{de, Deserialize, Serialize},
+        serde_json::{
+            de::{IoRead, Read},
+            Deserializer,
+        },
+        sha3::{Digest, Keccak256},
+        std::{
+            collections::BTreeMap,
+            fs::{self, File},
+            io::{BufRead, BufReader, Error, ErrorKind, Write},
+            path::{Path, PathBuf},
+        },
+    };
+    pub use {
+        geth::GethAccountExtractor,
+        open_ethereum::{generate_evm_state_json, OpenEthereumAccountExtractor},
+    };
 
     #[derive(Debug)]
     pub struct AccountPair {
@@ -776,20 +782,19 @@ pub mod evm_genesis {
 
         #[cfg(test)]
         mod tests {
-            use solana_program::pubkey::Pubkey;
-
-            use crate::{
-                account::AccountSharedData,
-                genesis_config::{
-                    evm_genesis::{
-                        self, AccountPair, EvmAccountDumpExtractor, OpenEthereumAccountExtractor,
-                    },
-                    GenesisConfig,
-                },
-            };
-
             use {
-                crate::signature::{Keypair, Signer},
+                crate::{
+                    account::AccountSharedData,
+                    genesis_config::{
+                        evm_genesis::{
+                            self, AccountPair, EvmAccountDumpExtractor,
+                            OpenEthereumAccountExtractor,
+                        },
+                        GenesisConfig,
+                    },
+                    signature::{Keypair, Signer},
+                },
+                solana_program::pubkey::Pubkey,
                 std::path::PathBuf,
             };
 

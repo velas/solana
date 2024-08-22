@@ -1,5 +1,4 @@
 use {
-    crate::ChainID,
     clap::ValueHint,
     log::{info, warn},
     primitive_types::U256,

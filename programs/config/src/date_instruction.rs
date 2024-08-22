@@ -23,7 +23,7 @@ impl Default for DateConfig {
     #[allow(deprecated)]
     fn default() -> Self {
         Self {
-            date_time: Utc.timestamp(0, 0),
+            date_time: Utc.timestamp_opt(0, 0).unwrap(),
         }
     }
 }

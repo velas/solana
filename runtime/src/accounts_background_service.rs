@@ -351,7 +351,16 @@ impl AbsRequestHandler {
             let evm_state = bank.evm().main_chain().state();
             let storage = evm_state.kvs();
             let handle_evm_error = move || -> evm_state::storage::Result<()> {
-                let removed_roots = storage.purge_slot(pruned_slot)?;
+                let mut last_result = Err(evm_state::storage::Error::RootNotFound(
+                    evm_state::H256::zero(),
+                ));
+                for _ in 0..3 {
+                    last_result = storage.purge_slot(pruned_slot);
+                    if last_result.is_ok() {
+                        break;
+                    }
+                }
+                let removed_roots = last_result?;
                 if !removed_roots.is_empty() {
                     // TODO: Rewrite it as long lived RootCleanupService.
                     let mut cleaner = evm_state::storage::RootCleanup::new(storage, removed_roots);

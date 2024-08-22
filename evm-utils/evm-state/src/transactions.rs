@@ -1,7 +1,7 @@
 pub use secp256k1::{PublicKey, SecretKey, SECP256K1};
 use {
     crate::error::*,
-    borsh::{BorshDeserialize, BorshSchema, BorshSerialize},
+    borsh::{BorshDeserialize, BorshSerialize},
     evm::{backend::Log, ExitReason, ExitRevert},
     primitive_types::{H160, H256, U256},
     rlp::{Decodable, DecoderError, Encodable, Rlp, RlpStream},
@@ -24,7 +24,6 @@ const UNSIGNED_TX_MARKER: u8 = 0x1;
 #[derive(
     BorshSerialize,
     BorshDeserialize,
-    BorshSchema,
     Clone,
     Debug,
     Eq,
@@ -34,6 +33,7 @@ const UNSIGNED_TX_MARKER: u8 = 0x1;
     Serialize,
     Deserialize,
 )]
+#[cfg_attr(feature = "borsh-schema", derive(borsh::BorshSchema))]
 pub struct Transaction {
     pub nonce: U256,
     pub gas_price: Gas,
@@ -117,7 +117,6 @@ impl Transaction {
 #[derive(
     BorshSerialize,
     BorshDeserialize,
-    BorshSchema,
     Debug,
     Clone,
     PartialEq,
@@ -127,6 +126,7 @@ impl Transaction {
     Serialize,
     Deserialize,
 )]
+#[cfg_attr(feature = "borsh-schema", derive(borsh::BorshSchema))]
 pub struct UnsignedTransaction {
     pub nonce: U256,
     pub gas_price: U256,
@@ -194,7 +194,6 @@ impl UnsignedTransaction {
 #[derive(
     BorshSerialize,
     BorshDeserialize,
-    BorshSchema,
     Copy,
     Clone,
     Debug,
@@ -205,6 +204,7 @@ impl UnsignedTransaction {
     Serialize,
     Deserialize,
 )]
+#[cfg_attr(feature = "borsh-schema", derive(borsh::BorshSchema))]
 pub enum TransactionAction {
     Call(Address),
     Create,
@@ -230,7 +230,6 @@ impl TransactionAction {
 #[derive(
     BorshSerialize,
     BorshDeserialize,
-    BorshSchema,
     Copy,
     Clone,
     Debug,
@@ -241,6 +240,7 @@ impl TransactionAction {
     Serialize,
     Deserialize,
 )]
+#[cfg_attr(feature = "borsh-schema", derive(borsh::BorshSchema))]
 pub struct TransactionSignature {
     pub v: u64,
     pub r: H256,

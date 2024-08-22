@@ -183,7 +183,6 @@ pub struct EvmBridge {
     max_batch_duration: Option<Duration>,
     subchain: bool,
 }
-type ChainID = u64;
 
 impl EvmBridge {
     fn new(
@@ -365,8 +364,7 @@ impl EvmBridge {
             }
         } else {
             if self.subchain {
-                error!("Subchain is not supported for old encoding");
-                return vec![];
+                panic!("Subchain is not supported for old encoding");
             }
             solana_evm_loader_program::send_raw_tx_old(
                 self.key.pubkey(),
@@ -397,10 +395,6 @@ impl EvmBridge {
         storage_pubkey: Pubkey,
         payer_pubkey: Pubkey,
     ) -> Vec<Instruction> {
-        if self.subchain {
-            error!("Subchain is not supported for big tx");
-            return vec![];
-        }
         let mut native_fee_used = false;
         let ix = if self.borsh_encoding {
             let mut fee_type = FeePayerType::Evm;
@@ -409,8 +403,23 @@ impl EvmBridge {
                 native_fee_used = true;
                 info!("Using Native fee for tx: {}", tx.tx_id_hash());
             }
-            solana_evm_loader_program::big_tx_execute(storage_pubkey, Some(&payer_pubkey), fee_type)
+            if self.subchain {
+                solana_evm_loader_program::big_tx_execute_subchain(
+                    storage_pubkey,
+                    Some(payer_pubkey),
+                    self.evm_chain_id,
+                )
+            } else {
+                solana_evm_loader_program::big_tx_execute(
+                    storage_pubkey,
+                    Some(&payer_pubkey),
+                    fee_type,
+                )
+            }
         } else {
+            if self.subchain {
+                panic!("Subchain is not supported for old encoding");
+            }
             solana_evm_loader_program::big_tx_execute_old(storage_pubkey, Some(&payer_pubkey))
         };
         if native_fee_used {
@@ -1016,7 +1025,7 @@ const SECRET_KEY_DUMMY: [u8; 32] = [1; 32];
 async fn main() -> StdResult<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let args = BridgeCli::parse();
+    let mut args = BridgeCli::parse();
 
     trace!("Bridge is starting with args: {args:?}");
 
@@ -1050,6 +1059,11 @@ async fn main() -> StdResult<(), Box<dyn std::error::Error>> {
         let file = File::open(path).unwrap();
         whitelist = serde_json::from_reader(file).unwrap();
         info!("Got whitelist: {:?}", whitelist);
+    }
+
+    if !args.borsh_encoding && args.subchain {
+        warn!("Old encoding is not supported for subchain, enforcing borsh encoding.");
+        args.borsh_encoding = true;
     }
 
     let mut meta = EvmBridge::new(

@@ -1,7 +1,7 @@
 use {
     inquire::Select,
     interactive_clap::{ResultFromCli, ToCliArgs},
-    std::{error::Error, fmt::Display, net::IpAddr, str::FromStr},
+    std::{error::Error, fmt::Display, str::FromStr},
     strum::{EnumDiscriminants, EnumIter, EnumMessage, IntoEnumIterator},
 };
 
@@ -62,7 +62,9 @@ pub struct Config {
 }
 
 impl Config {
-    fn input_minting_addresses(context: &()) -> color_eyre::eyre::Result<Option<MintingAddresses>> {
+    fn input_minting_addresses(
+        _context: &(),
+    ) -> color_eyre::eyre::Result<Option<MintingAddresses>> {
         let mut addresses = vec![];
         let mut balances = vec![];
 
@@ -109,7 +111,7 @@ impl Config {
         }))
     }
 
-    fn input_chain_id(context: &()) -> color_eyre::eyre::Result<Option<u64>> {
+    fn input_chain_id(_context: &()) -> color_eyre::eyre::Result<Option<u64>> {
         match inquire::CustomType::new(
             "Select a Chain ID (should be unique, and start with 0x56): 0x56",
         )
@@ -124,7 +126,7 @@ impl Config {
         }
     }
 
-    fn input_hardfork(context: &()) -> color_eyre::eyre::Result<Option<Hardfork>> {
+    fn input_hardfork(_context: &()) -> color_eyre::eyre::Result<Option<Hardfork>> {
         let variants = HardforkDiscriminants::iter().collect::<Vec<_>>();
         let selected = Select::new("Hardfork version:", variants).prompt()?;
         match selected {
@@ -176,7 +178,7 @@ pub struct FileConfig {
     keypair_path: String,
 }
 impl FileConfig {
-    fn input_keypair_path(context: &()) -> color_eyre::eyre::Result<Option<String>> {
+    fn input_keypair_path(_context: &()) -> color_eyre::eyre::Result<Option<String>> {
         let default_keypair = if let Some(config) = &*solana_cli_config::CONFIG_FILE {
             let config = solana_cli_config::Config::load(&config)?;
             config.keypair_path
@@ -265,14 +267,6 @@ const CHAIN_ID_PREFIX: u64 = 0x56; // V in hex
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChainID(u64);
-
-impl ChainID {
-    fn to_u64_prefixed(&self) -> u64 {
-        let val = self.to_string().len();
-        // shift prefix to val hex digits
-        CHAIN_ID_PREFIX << (val * 4) | self.0
-    }
-}
 
 impl From<u64> for ChainID {
     fn from(value: u64) -> Self {
@@ -392,7 +386,7 @@ fn main() -> color_eyre::Result<()> {
     match cmd.subcommand {
         SubCommand::GenerateConfig(config) => {
             println!("Saving config to file {}", config.config_path);
-            config.save();
+            config.save()?;
         }
         SubCommand::CreateAndDeploy(file_config) => {
             println!("Loading config from file {}", file_config.config_file);

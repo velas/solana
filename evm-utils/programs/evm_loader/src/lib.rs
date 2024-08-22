@@ -255,6 +255,32 @@ pub fn big_tx_execute(
         account_metas,
     )
 }
+pub fn big_tx_execute_subchain(
+    storage: solana::Address,
+    gas_collector: Option<solana::Address>,
+    chain_id: ChainID,
+) -> solana::Instruction {
+    let evm_subchain_state_pda = evm_state_subchain_account(chain_id);
+
+    let mut account_metas = vec![
+        AccountMeta::new(solana::evm_state::ID, false),
+        AccountMeta::new(evm_subchain_state_pda, false),
+        AccountMeta::new(storage, true),
+    ];
+    if let Some(gas_collector) = gas_collector {
+        account_metas.push(AccountMeta::new(gas_collector, false))
+    }
+
+    create_evm_instruction_with_borsh(
+        crate::ID,
+        &EvmInstruction::EvmSubchain(EvmSubChain::ExecuteTransaction {
+            tx: ExecuteTransaction::Signed { tx: None },
+            chain_id: chain_id,
+        }),
+        account_metas,
+    )
+}
+
 pub fn big_tx_execute_authorized(
     storage: solana::Address,
     from: evm::Address,

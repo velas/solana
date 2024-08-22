@@ -1592,7 +1592,7 @@ pub mod tests {
         blockstore.purge_and_compact_slots(0, 99);
         {
             // check that blocks 1, 2 are deleted and blocks 3, 4 are still in blockstore
-            let mut evm_blocks_iterator = blockstore.evm_blocks_iterator(0).unwrap();
+            let mut evm_blocks_iterator = blockstore.evm_blocks_iterator(None, 0).unwrap();
             assert_eq!(evm_blocks_iterator.next().unwrap().1.block_number, 3);
             assert_eq!(evm_blocks_iterator.next().unwrap().1.block_number, 4);
         }
@@ -1631,7 +1631,7 @@ pub mod tests {
             .unwrap();
         {
             // check that only "purged" blocks were deleted by compaction
-            let mut evm_blocks_iterator = blockstore.evm_blocks_iterator(0).unwrap();
+            let mut evm_blocks_iterator = blockstore.evm_blocks_iterator(None, 0).unwrap();
             assert_eq!(evm_blocks_iterator.next().unwrap().1.block_number, 3);
             assert_eq!(evm_blocks_iterator.next().unwrap().1.block_number, 4);
         }

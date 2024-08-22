@@ -366,11 +366,7 @@ impl ChainERPC for ChainErpcImpl {
         address: Address,
         block: Option<BlockId>,
     ) -> BoxFuture<Result<Bytes, Error>> {
-        Box::pin(async move {
-            let chain_id = meta.get_main_chain_id();
-
-            ChainIDErpcImpl.code(meta, None, address, block).await
-        })
+        Box::pin(async move { ChainIDErpcImpl.code(meta, None, address, block).await })
     }
 
     #[instrument(skip(self, meta))]
@@ -866,7 +862,7 @@ impl ChainIDERPC for ChainIDErpcImpl {
         Box::pin(async move {
             let saved_state = block_to_state_root(chain, block, &meta).await;
 
-            let result = call(meta, tx, saved_state.unwrap(), meta_keys)?;
+            let result = call(meta, chain, tx, saved_state.unwrap(), meta_keys)?;
             Ok(Bytes(result.exit_data))
         })
     }
@@ -893,7 +889,7 @@ impl ChainIDERPC for ChainIDErpcImpl {
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| into_native_error(e, false))?;
             let saved_state = block_to_state_root(chain, block, &meta).await;
-            let result = call(meta, tx, saved_state.unwrap(), meta_keys)?;
+            let result = call(meta, chain, tx, saved_state.unwrap(), meta_keys)?;
             Ok(result.used_gas.into())
         })
     }
@@ -1001,8 +997,8 @@ impl TraceERPC for TraceErpcImpl {
         meta_info: Option<TraceMeta>,
     ) -> BoxFuture<Result<Option<evm_rpc::trace::TraceResultsWithTransactionHash>, Error>> {
         let meta_info = meta_info.unwrap_or_default();
-        let chain_id = meta.get_main_chain_id();
 
+        let chain_id = meta.get_main_chain_id();
         Box::pin(async move {
             match transaction_by_hash(meta.clone(), None, tx_hash).await {
                 Ok(Some(tx)) => {
@@ -1052,8 +1048,6 @@ impl TraceERPC for TraceErpcImpl {
         traces: Vec<String>,
         meta_info: Option<TraceMeta>,
     ) -> BoxFuture<Result<Vec<evm_rpc::trace::TraceResultsWithTransactionHash>, Error>> {
-        let chain_id = meta.get_main_chain_id();
-
         Box::pin(async move {
             let block =
                 if let Some(block) = block_by_number(meta.clone(), None, block_num, true).await? {
@@ -1367,11 +1361,12 @@ struct TxOutput {
 #[instrument(skip(meta))]
 fn call(
     meta: Arc<JsonRpcRequestProcessor>,
+    chain: EvmChain,
     tx: RPCTransaction,
     saved_state: StateRootWithBank,
     meta_keys: Vec<solana_sdk::pubkey::Pubkey>,
 ) -> Result<TxOutput, Error> {
-    let outputs = call_many(meta, &[(tx, meta_keys)], saved_state, true)?;
+    let outputs = call_many(meta, chain, &[(tx, meta_keys)], saved_state, true)?;
 
     let TxOutput {
         exit_reason,
@@ -1396,6 +1391,7 @@ fn call(
 #[instrument(skip(meta))]
 fn call_many(
     meta: Arc<JsonRpcRequestProcessor>,
+    chain: EvmChain,
     txs: &[(RPCTransaction, Vec<solana_sdk::pubkey::Pubkey>)],
     saved_state: StateRootWithBank,
     estimate: bool,
@@ -1407,8 +1403,13 @@ fn call_many(
         .unwrap_or_else(|| meta.bank(Some(CommitmentConfig::processed())));
 
     let evm_state = if use_latest_state {
+        let state = if let Some(chain_id) = chain {
+            bank.evm().chain_state(chain_id).evm_state.clone()
+        } else {
+            bank.evm().main_chain().state().clone()
+        };
         // keep current bank to allow simulating on latest state without archive
-        match bank.evm().main_chain().state().clone() {
+        match state {
             evm_state::EvmState::Incomming(i) => i,
             evm_state::EvmState::Committed(c) => {
                 c.next_incomming(bank.clock().unix_timestamp as u64)
@@ -1432,7 +1433,12 @@ fn call_many(
 
     //TODO: Hashes actual to saved root
     // Copy 8kb
-    let last_hashes = *bank.evm().main_chain().blockhashes().get_hashes();
+    let last_hashes = if let Some(chain_id) = chain {
+        [H256::zero(); 256] // TODO: get from state account
+    } else {
+        *bank.evm().main_chain().blockhashes().get_hashes()
+    };
+
     let mut executor = evm_state::Executor::with_config(
         evm_state,
         evm_state::ChainContext::new(last_hashes),
@@ -1453,6 +1459,7 @@ fn call_many(
     for (tx, meta_keys) in txs {
         result.push(call_inner(
             &mut executor,
+            chain,
             tx.clone(),
             meta_keys.clone(),
             &bank,
@@ -1464,6 +1471,7 @@ fn call_many(
 #[instrument(skip(executor, bank))]
 fn call_inner(
     executor: &mut evm_state::Executor,
+    chain: EvmChain,
     tx: RPCTransaction,
     meta_keys: Vec<solana_sdk::pubkey::Pubkey>,
     bank: &Bank,
@@ -1560,12 +1568,12 @@ fn call_inner(
             Some(tx_chain_id),
             tx_hash,
             true,
-            false, // allow zero fee
+            chain.is_some(), // allow zero fee
             simulation_entrypoint(
                 PrecompileSet::VelasClassic, // FIXME: encapsulate under feature activation
                 &evm_keyed_account,
                 &user_accounts,
-                executor.chain_id() != bank.evm().main_chain().id(), // TODO: Better way?
+                chain.is_some(),
             ),
         )
         .with_context(|_| EvmStateError)?;
@@ -1657,7 +1665,6 @@ async fn trace_call_many(
     block: Option<BlockId>,
     estimate: bool,
 ) -> Result<Vec<evm_rpc::trace::TraceResultsWithTransactionHash>, Error> {
-    let chain_id = meta.get_main_chain_id();
     let saved_state = block_to_state_root(None, block, &meta).await;
 
     let mut txs = Vec::new();
@@ -1678,7 +1685,7 @@ async fn trace_call_many(
         txs_meta.push(meta);
     }
 
-    let traces = call_many(meta, &txs, saved_state.unwrap(), estimate)?.into_iter();
+    let traces = call_many(meta, None, &txs, saved_state.unwrap(), estimate)?.into_iter();
 
     let mut result = Vec::new();
     for (output, meta_tx) in traces.zip(txs_meta) {

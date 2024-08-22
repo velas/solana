@@ -266,15 +266,13 @@ pub fn debug_evm_roots(
 #[cfg(test)]
 mod evmtests {
 
-    pub use solana_sdk::reward_type::RewardType;
     use {
         crate::bank::Bank,
         evm_state::{AccountProvider, EvmState, FromKey, H160, TEST_CHAIN_ID, U256},
         log::*,
         solana_evm_loader_program::{
-            precompiles::ETH_TO_VLX_ADDR,
-            processor::SUBCHAIN_CREATION_DEPOSIT_VLX,
-            scope::evm::{gweis_to_lamports, lamports_to_gwei},
+            precompiles::ETH_TO_VLX_ADDR, processor::SUBCHAIN_CREATION_DEPOSIT_VLX,
+            scope::evm::lamports_to_gwei,
         },
         solana_program_runtime::{evm_executor_context::StateExt, timings::ExecuteTimings},
         solana_sdk::{

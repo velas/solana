@@ -32,6 +32,7 @@ use {
 /// keyed_accounts: Accounts passed as part of the instruction
 /// instruction_data: Instruction data
 /// invoke_context: Invocation context
+#[allow(improper_ctypes_definitions)]
 pub type LoaderEntrypoint = unsafe extern "C" fn(
     program_id: &Pubkey,
     instruction_data: &[u8],
@@ -43,6 +44,7 @@ pub type LoaderEntrypoint = unsafe extern "C" fn(
 /// program_id: Program ID of the currently executing program
 /// keyed_accounts: Accounts passed as part of the instruction
 /// instruction_data: Instruction data
+#[allow(improper_ctypes_definitions)]
 pub type ProgramEntrypoint = unsafe extern "C" fn(
     program_id: &Pubkey,
     keyed_accounts: &[KeyedAccount],

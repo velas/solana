@@ -761,8 +761,7 @@ impl<'a> InvokeContext<'a> {
     }
 
     pub fn get_slot_from_evm_context(&self) -> Option<u64> {
-        self.evm_executor_context.as_ref()
-            .map(|ctx|ctx.get_slot())
+        self.evm_executor_context.as_ref().map(|ctx| ctx.get_slot())
     }
 
     /// Helper to prepare for process_instruction()
@@ -1341,10 +1340,6 @@ pub fn mock_process_instruction(
 
 #[cfg(test)]
 mod tests {
-    use solana_sdk::{
-        instruction::CompiledInstruction,
-        message::{v0::Message, SanitizedMessage},
-    };
 
     use {
         super::*,

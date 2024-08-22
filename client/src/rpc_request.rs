@@ -137,6 +137,8 @@ pub enum RpcRequest {
     EthTraceCallMany,
     EthTraceReplayTransaction,
     EthTraceReplayBlock,
+    // vlx methods
+    VlxCall,
 
     /// Velas Account scope
     GetVelasAccountsByOperationalKey,
@@ -232,14 +234,21 @@ impl fmt::Display for RpcRequest {
             RpcRequest::EthTraceCall => "trace_call",
             RpcRequest::EthTraceCallMany => "trace_callMany",
             RpcRequest::EthGetBlockTransactionCountByHash => "eth_getBlockTransactionCountByHash",
-            RpcRequest::EthGetBlockTransactionCountByNumber => "eth_getBlockTransactionCountByNumber",
-            RpcRequest::EthGetTransactionByBlockHashAndIndex => "eth_getTransactionByBlockHashAndIndex",
-            RpcRequest::EthGetTransactionByBlockNumberAndIndex => "eth_getTransactionByBlockNumberAndIndex",
+            RpcRequest::EthGetBlockTransactionCountByNumber => {
+                "eth_getBlockTransactionCountByNumber"
+            }
+            RpcRequest::EthGetTransactionByBlockHashAndIndex => {
+                "eth_getTransactionByBlockHashAndIndex"
+            }
+            RpcRequest::EthGetTransactionByBlockNumberAndIndex => {
+                "eth_getTransactionByBlockNumberAndIndex"
+            }
             RpcRequest::EthTraceReplayTransaction => "trace_replayTransaction",
             RpcRequest::EthTraceReplayBlock => "trace_replayBlockTransactions",
             RpcRequest::EthEstimateGas => "eth_estimateGas",
             RpcRequest::EthGetLogs => "eth_getLogs",
             RpcRequest::EthSyncing => "eth_syncing",
+            RpcRequest::VlxCall => "vlx_call",
             RpcRequest::GetVelasAccountsByOperationalKey => "getVelasAccountsByOperationalKey",
             RpcRequest::GetVelasAccountsByOwnerKey => "getVelasAccountsByOwnerKey",
             RpcRequest::GetVelasRelyingPartiesByOwnerKey => "getVelasRelyingPartiesByOwnerKey",

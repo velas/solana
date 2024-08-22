@@ -852,7 +852,12 @@ mod tests {
         let create_tx = create_tx.sign(&alice.secret, Some(chain_id));
         assert!(matches!(
             executor
-                .transaction_execute(create_tx.clone(), true, OwnedPrecompile::default())
+                .transaction_execute(
+                    create_tx.clone(),
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default()
+                )
                 .unwrap()
                 .exit_reason,
             ExitReason::Succeed(ExitSucceed::Returned)
@@ -861,7 +866,7 @@ mod tests {
         let hash = create_tx.tx_id_hash();
         assert!(matches!(
             executor
-                .transaction_execute(create_tx, true, OwnedPrecompile::default())
+                .transaction_execute(create_tx, true, false/*allow zero */, OwnedPrecompile::default())
                 .unwrap_err(),
             Error::DuplicateTx { tx_hash } if tx_hash == hash
         ));
@@ -896,6 +901,7 @@ mod tests {
                     alice.address(),
                     create_tx.clone(),
                     true,
+                    false, /*allow zero */
                     OwnedPrecompile::default()
                 )
                 .unwrap()
@@ -906,7 +912,7 @@ mod tests {
         let hash = create_tx.signing_hash(Some(chain_id));
         assert!(matches!(
             executor
-            .transaction_execute_unsinged(alice.address(), create_tx, true, OwnedPrecompile::default())
+            .transaction_execute_unsinged(alice.address(), create_tx, true,false/*allow zero */, OwnedPrecompile::default())
                 .unwrap_err(),
             Error::DuplicateTx { tx_hash } if tx_hash == hash
         ));
@@ -944,7 +950,12 @@ mod tests {
             let create_tx = alice.create(&code);
             assert!(matches!(
                 executor
-                    .transaction_execute(create_tx.clone(), true, OwnedPrecompile::default())
+                    .transaction_execute(
+                        create_tx.clone(),
+                        true,
+                        false, /*allow zero */
+                        OwnedPrecompile::default()
+                    )
                     .unwrap()
                     .exit_reason,
                 ExitReason::Succeed(ExitSucceed::Returned)
@@ -982,7 +993,12 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(call_tx, true, OwnedPrecompile::default())
+                .transaction_execute(
+                    call_tx,
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default(),
+                )
                 .unwrap();
 
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
@@ -1043,6 +1059,7 @@ mod tests {
                     address,
                     create_tx.clone(),
                     true,
+                    false, /*allow zero */
                     OwnedPrecompile::default()
                 )
                 .unwrap_err(),
@@ -1055,7 +1072,13 @@ mod tests {
 
         assert_eq!(
             executor
-                .transaction_execute_unsinged(address, create_tx, true, OwnedPrecompile::default())
+                .transaction_execute_unsinged(
+                    address,
+                    create_tx,
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default()
+                )
                 .unwrap()
                 .exit_reason,
             ExitReason::Succeed(ExitSucceed::Stopped)
@@ -1092,6 +1115,7 @@ mod tests {
                     address,
                     create_tx.clone(),
                     true,
+                    false, /*allow zero */
                     OwnedPrecompile::default()
                 )
                 .unwrap()
@@ -1111,7 +1135,13 @@ mod tests {
 
         assert_eq!(
             executor
-                .transaction_execute_unsinged(address, create_tx, true, OwnedPrecompile::default())
+                .transaction_execute_unsinged(
+                    address,
+                    create_tx,
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default()
+                )
                 .unwrap_err(),
             Error::DuplicateTx { tx_hash: hash }
         );
@@ -1144,7 +1174,7 @@ mod tests {
         let wrong_tx = create_tx.clone().sign(&alice.secret, None);
         assert!(matches!(
             dbg!(executor
-                .transaction_execute(wrong_tx, true, OwnedPrecompile::default())
+                .transaction_execute(wrong_tx, true,false/*allow zero */, OwnedPrecompile::default())
                 .unwrap_err()),
             Error::WrongChainId {
                 chain_id: err_chain_id,
@@ -1157,7 +1187,7 @@ mod tests {
             .sign(&alice.secret, Some(another_chain_id));
         assert!(matches!(
             executor
-                .transaction_execute(wrong_tx, true, OwnedPrecompile::default())
+                .transaction_execute(wrong_tx, true,false/*allow zero */, OwnedPrecompile::default())
                 .unwrap_err(),
             Error::WrongChainId {
                 chain_id: err_chain_id,
@@ -1168,7 +1198,12 @@ mod tests {
         let create_tx = create_tx.sign(&alice.secret, Some(chain_id));
         assert!(matches!(
             executor
-                .transaction_execute(create_tx, true, OwnedPrecompile::default())
+                .transaction_execute(
+                    create_tx,
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default()
+                )
                 .unwrap()
                 .exit_reason,
             ExitReason::Succeed(ExitSucceed::Returned)
@@ -1198,7 +1233,12 @@ mod tests {
 
         assert!(matches!(
             executor
-                .transaction_execute(create_tx, true, OwnedPrecompile::default())
+                .transaction_execute(
+                    create_tx,
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default()
+                )
                 .unwrap()
                 .exit_reason,
             ExitReason::Succeed(ExitSucceed::Returned)
@@ -1218,7 +1258,12 @@ mod tests {
             exit_data: bytes,
             ..
         } = executor
-            .transaction_execute(call_tx, true, OwnedPrecompile::default())
+            .transaction_execute(
+                call_tx,
+                true,
+                false, /*allow zero */
+                OwnedPrecompile::default(),
+            )
             .unwrap();
 
         assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
@@ -1248,7 +1293,12 @@ mod tests {
             exit_data: bytes,
             ..
         } = executor
-            .transaction_execute(send_tx, true, OwnedPrecompile::default())
+            .transaction_execute(
+                send_tx,
+                true,
+                false, /*allow zero */
+                OwnedPrecompile::default(),
+            )
             .unwrap();
         assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
         assert_eq!(
@@ -1272,7 +1322,12 @@ mod tests {
             exit_data: bytes,
             ..
         } = executor
-            .transaction_execute(call_tx, true, OwnedPrecompile::default())
+            .transaction_execute(
+                call_tx,
+                true,
+                false, /*allow zero */
+                OwnedPrecompile::default(),
+            )
             .unwrap();
         assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
         assert_eq!(
@@ -1296,7 +1351,12 @@ mod tests {
             exit_data: bytes,
             ..
         } = executor
-            .transaction_execute(call_tx, true, OwnedPrecompile::default())
+            .transaction_execute(
+                call_tx,
+                true,
+                false, /*allow zero */
+                OwnedPrecompile::default(),
+            )
             .unwrap();
         assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
         assert_eq!(
@@ -1337,7 +1397,12 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(send_tx, true, OwnedPrecompile::default())
+                .transaction_execute(
+                    send_tx,
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default(),
+                )
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1361,7 +1426,12 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(call_tx, true, OwnedPrecompile::default())
+                .transaction_execute(
+                    call_tx,
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default(),
+                )
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1385,7 +1455,12 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(call_tx, true, OwnedPrecompile::default())
+                .transaction_execute(
+                    call_tx,
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default(),
+                )
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1420,7 +1495,12 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(send_tx, true, OwnedPrecompile::default())
+                .transaction_execute(
+                    send_tx,
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default(),
+                )
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1444,7 +1524,12 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(call_tx, true, OwnedPrecompile::default())
+                .transaction_execute(
+                    call_tx,
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default(),
+                )
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1468,7 +1553,12 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(call_tx, true, OwnedPrecompile::default())
+                .transaction_execute(
+                    call_tx,
+                    true,
+                    false, /*allow zero */
+                    OwnedPrecompile::default(),
+                )
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1524,6 +1614,7 @@ mod tests {
                     input: data.to_vec(),
                 },
                 true,
+                false, /*allow zero */
                 OwnedPrecompile::default(),
             )
             .unwrap();

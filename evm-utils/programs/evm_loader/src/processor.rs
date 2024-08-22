@@ -27,7 +27,6 @@ use {
         keyed_account::KeyedAccount,
         native_token::LAMPORTS_PER_VLX,
         program_utils::limited_deserialize,
-        pubkey::Pubkey,
         system_instruction,
     },
     std::{cell::RefMut, fmt::Write, ops::DerefMut},
@@ -1272,8 +1271,7 @@ mod test {
         super::*,
         evm_state::{
             transactions::{TransactionAction, TransactionSignature},
-            AccountProvider, AccountState, EvmBackend, ExitReason, ExitSucceed, FromKey, Incomming,
-            BURN_GAS_PRICE,
+            AccountProvider, AccountState, ExitReason, ExitSucceed, FromKey, BURN_GAS_PRICE,
         },
         hex_literal::hex,
         num_traits::Zero,
@@ -3428,6 +3426,7 @@ mod test {
 
         let mut evm_context = EvmMockContext::new(1000);
         evm_context.disable_feature(&solana_sdk::feature_set::velas::burn_fee::id());
+        evm_context.disable_feature(&solana_sdk::feature_set::velas::evm_subchain::id());
 
         let mut rand = evm_state::rand::thread_rng();
         let contract_address = evm::SecretKey::new(&mut rand).to_address();
@@ -3600,6 +3599,10 @@ mod test {
         let chain_id = 0x561;
         user_acc.set_owner(system_program::ID);
         user_acc.set_lamports(10000000000000000);
+
+        evm_context
+            .feature_set
+            .deactivate(&solana_sdk::feature_set::velas::evm_subchain::id());
         let err = evm_context
             .process_instruction(crate::create_evm_subchain_account(
                 user_id,
@@ -3635,7 +3638,7 @@ mod test {
 
         //TODO: Check account state in native chain.
         // failed because already exist
-        let _err = evm_context
+        let err = evm_context
             .process_instruction(crate::create_evm_subchain_account(
                 user_id,
                 chain_id,

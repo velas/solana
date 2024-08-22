@@ -541,12 +541,24 @@ async fn process_tx(
     let rpc_tx = RPCTransaction::from_transaction(tx.clone().into())?;
 
     if bridge.simulate {
-        // Try simulate transaction execution
-        bridge
-            .rpc_client
-            .send::<Bytes>(RpcRequest::EthCall, json!([rpc_tx, "latest"])) //TODO: fix this to vlx_call
-            .await
-            .map_err(from_client_error)?;
+        if bridge.subchain {
+            // Try simulate transaction execution
+            bridge
+                .rpc_client
+                .send::<Bytes>(
+                    RpcRequest::VlxCall,
+                    json!([bridge.evm_chain_id, rpc_tx, "latest"]),
+                )
+                .await
+                .map_err(from_client_error)?;
+        } else {
+            // Try simulate transaction execution
+            bridge
+                .rpc_client
+                .send::<Bytes>(RpcRequest::EthCall, json!([rpc_tx, "latest"]))
+                .await
+                .map_err(from_client_error)?;
+        }
     }
 
     if bytes.len() > evm::TX_MTU {

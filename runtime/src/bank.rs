@@ -7180,7 +7180,14 @@ impl Drop for Bank {
     fn drop(&mut self) {
         use evm_state::{storage, Storage};
         fn handle_evm_error(storage: &Storage, slot: u64) -> storage::Result<()> {
-            let removed_roots = storage.purge_slot(slot)?;
+            let mut last_result = Err(storage::Error::RootNotFound(evm_state::H256::zero()));
+            for _ in 0..3 {
+                last_result = storage.purge_slot(slot);
+                if last_result.is_ok() {
+                    break;
+                }
+            }
+            let removed_roots = last_result?;
             if !removed_roots.is_empty() {
                 let mut cleaner = evm_state::storage::RootCleanup::new(storage, removed_roots);
                 cleaner.cleanup()?
@@ -7240,7 +7247,6 @@ pub(crate) mod tests {
             status_cache::MAX_CACHE_ENTRIES,
         },
         crossbeam_channel::{bounded, unbounded},
-        evm_state::{FromKey, H256},
         solana_program_runtime::{
             accounts_data_meter::MAX_ACCOUNTS_DATA_LEN,
             compute_budget::MAX_COMPUTE_UNIT_LIMIT,
