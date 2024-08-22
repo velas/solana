@@ -7181,7 +7181,7 @@ impl Drop for Bank {
         use evm_state::{storage, Storage};
         fn handle_evm_error(storage: &Storage, slot: u64) -> storage::Result<()> {
             let mut last_result = Err(storage::Error::RootNotFound(evm_state::H256::zero()));
-            for _ in 0..3 {
+            for _ in 0..5 {
                 last_result = storage.purge_slot(slot);
                 if last_result.is_ok() {
                     break;

@@ -38,6 +38,7 @@ pub struct StateRootWithBank {
     pub bank: Option<Arc<Bank>>,
     pub block: BlockId,
     pub block_timestamp: Option<u64>,
+    pub chain: EvmChain,
 }
 
 impl StateRootWithBank {
@@ -53,10 +54,10 @@ impl StateRootWithBank {
 
         let root = *self.state_root.as_ref().unwrap();
         if let Some(bank) = &self.bank {
-            let evm = bank.evm().main_chain().state();
-
-            assert!(evm.last_root() == root, "we store bank with invalid root");
-            return Ok(evm.get_account_state(address));
+            return self.with_evm_state(bank, |evm| {
+                assert!(evm.last_root() == root, "we store bank with invalid root");
+                Ok(evm.get_account_state(address))
+            });
         }
         let archive_evm_state = meta
             .evm_state_archive(self.block_timestamp)
@@ -68,6 +69,19 @@ impl StateRootWithBank {
         Ok(archive_evm_state
             .get_account_state_at(root, address)
             .unwrap_or_default())
+    }
+
+    pub fn with_evm_state<F, T>(&self, bank: &Bank, f: F) -> Result<T, Error>
+    where
+        F: FnOnce(&evm_state::EvmState) -> Result<T, Error>,
+    {
+        if let Some(chain_id) = self.chain {
+            let evm = &bank.evm().chain_state(chain_id).evm_state;
+            f(evm)
+        } else {
+            let evm = bank.evm().main_chain().state();
+            f(&evm)
+        }
     }
 
     pub fn get_storage_at(
@@ -83,10 +97,10 @@ impl StateRootWithBank {
 
         let root = *self.state_root.as_ref().unwrap();
         if let Some(bank) = &self.bank {
-            let evm = bank.evm().main_chain().state();
-
-            assert!(evm.last_root() == root, "we store bank with invalid root");
-            return Ok(evm.get_storage(address, idx));
+            return self.with_evm_state(bank, |evm| {
+                assert!(evm.last_root() == root, "we store bank with invalid root");
+                Ok(evm.get_storage(address, idx))
+            });
         }
         let archive_evm_state = meta
             .evm_state_archive(self.block_timestamp)
@@ -126,25 +140,26 @@ async fn block_to_state_root(
     let block_num = match block_id {
         BlockId::RelativeId(BlockRelId::Pending) | BlockId::RelativeId(BlockRelId::Latest) => {
             let bank = meta.bank(Some(CommitmentConfig::processed()));
-            let (bank, last_root) = if let Some(chain_id) = chain {
+            let last_root = if let Some(chain_id) = chain {
                 if chain_id == meta.get_main_chain_id() {
                     return Err(Error::WrongChainId {
                         chain_id: meta.get_main_chain_id(),
                         tx_chain_id: None,
                     });
                 }
-                (None, bank.evm().chain_state(chain_id).evm_state.last_root())
+                bank.evm().chain_state(chain_id).evm_state.last_root()
             } else {
                 let evm = bank.evm().main_chain().state();
                 let last_root = evm.last_root();
                 drop(evm);
-                (Some(bank), last_root)
+                last_root
             };
             return Ok(StateRootWithBank {
                 state_root: Some(last_root),
-                bank,
+                bank: Some(bank),
                 block: block_id,
                 block_timestamp: None,
+                chain,
             });
         }
         BlockId::RelativeId(BlockRelId::Earliest) | BlockId::Num(Hex(0)) => {
@@ -161,6 +176,7 @@ async fn block_to_state_root(
                     bank: None,
                     block: block_id,
                     block_timestamp: None,
+                    chain,
                 });
             }
         }
@@ -183,6 +199,7 @@ async fn block_to_state_root(
             .get_evm_block_by_id(chain, block_num)
             .await
             .map(|(block, _)| block.header.timestamp),
+        chain,
     })
 }
 

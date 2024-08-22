@@ -219,6 +219,17 @@ impl AsyncRpcClient {
         self.send(RpcRequest::EthGetTransactionCount, json!([*address]))
             .await
     }
+    pub async fn get_evm_subchain_transaction_count(
+        &self,
+        chain_id: u64,
+        address: &Address,
+    ) -> ClientResult<U256> {
+        self.send(
+            RpcRequest::VlxGetTransactionCount,
+            json!([chain_id, *address]),
+        )
+        .await
+    }
 
     pub async fn get_evm_transaction_receipt(
         &self,
@@ -226,6 +237,17 @@ impl AsyncRpcClient {
     ) -> ClientResult<Option<RPCReceipt>> {
         self.send::<Option<RPCReceipt>>(RpcRequest::EthGetTransactionReceipt, json!([*hash]))
             .await
+    }
+    pub async fn get_evm_subchain_transaction_receipt(
+        &self,
+        chain_id: u64,
+        hash: &H256,
+    ) -> ClientResult<Option<RPCReceipt>> {
+        self.send::<Option<RPCReceipt>>(
+            RpcRequest::VlxGetTransactionReceipt,
+            json!([chain_id, *hash]),
+        )
+        .await
     }
 
     pub async fn get_version(&self) -> ClientResult<RpcVersionInfo> {
