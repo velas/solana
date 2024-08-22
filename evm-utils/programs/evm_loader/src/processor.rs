@@ -34,7 +34,7 @@ use {
 
 pub const BURN_ADDR: evm_state::H160 = evm_state::H160::zero();
 
-const SUBCHAIN_CREATION_DEPOSIT_VLX: u64 = 1_000_000;
+pub const SUBCHAIN_CREATION_DEPOSIT_VLX: u64 = 1_000_000;
 
 /// Return the next AccountInfo or a NotEnoughAccountKeys error
 pub fn next_account_info<'a, 'b, I: Iterator<Item = &'a KeyedAccount<'b>>>(
@@ -2367,14 +2367,15 @@ mod test {
         // create accounts
         let mut rand: evm_state::rand::prelude::ThreadRng = evm_state::rand::thread_rng();
         let subchain_owner = Pubkey::new_unique();
+        let alice = Pubkey::new_unique();
         let subchain_owner_acc = evm_context.native_account(subchain_owner);
-        let bob = evm::SecretKey::new(&mut rand);
+        let bob = evm::SecretKey::new(&mut rand); // SECRET_KEY_DUMMY
         let bob_addr = bob.to_address();
-        subchain_owner_acc.set_lamports(SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX);
+        subchain_owner_acc.set_lamports(SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX + 777);
         evm_context.deposit_evm(bob_addr, lamports_to_gwei(10_000_000));
 
         // create subchain
-        let subchain_id = 51777;
+        let subchain_id = 0x5677;
         let subchain_config = SubchainConfig {
             hardfork: crate::instructions::Hardfork::Istanbul,
             mint: vec![(bob_addr, 20_000_000)],
@@ -2386,7 +2387,7 @@ mod test {
 
         // empty native balance after subchain cration fee
         let subchain_owner_acc = evm_context.native_account(subchain_owner);
-        assert_eq!(subchain_owner_acc.lamports(), 0);
+        assert_eq!(subchain_owner_acc.lamports(), 777);
 
         // check EVM balances
         let bobs_subchain_acc = evm_context
@@ -2409,9 +2410,7 @@ mod test {
             value: crate::scope::evm::lamports_to_gwei(4_000_000),
             input: precompiles::ETH_TO_VLX_CODE
                 .abi
-                .encode_input(&[ethabi::Token::FixedBytes(
-                    subchain_owner.to_bytes().to_vec(),
-                )])
+                .encode_input(&[ethabi::Token::FixedBytes(alice.to_bytes().to_vec())])
                 .unwrap(),
         }
         .sign(&bob, Some(TEST_CHAIN_ID));
@@ -2419,18 +2418,21 @@ mod test {
         // error!("subchain_owner: {:?}", subchain_owner);
         // error!("subchain_owner2: {:?}", subchain_owner.to_bytes());
         // error!("INPUT: {:?}", &swap_within_mainchain.input);
+        let mut ix = crate::send_raw_tx(
+            subchain_owner,
+            swap_within_mainchain,
+            None,
+            FeePayerType::Evm,
+        );
+        ix.accounts.push(AccountMeta {
+            pubkey: alice,
+            is_signer: false,
+            is_writable: true,
+        });
+        evm_context.process_instruction(ix).unwrap();
 
-        evm_context
-            .process_instruction(crate::send_raw_tx(
-                subchain_owner,
-                swap_within_mainchain,
-                None,
-                FeePayerType::Evm,
-            ))
-            .unwrap();
-
-        let subchain_owner_acc = evm_context.native_account(subchain_owner);
-        assert_eq!(subchain_owner_acc.lamports(), 4_000_000);
+        let alice_acc = evm_context.native_account(alice);
+        assert_eq!(alice_acc.lamports(), 4_000_000);
 
         // try to swap from EVM subchain and assert unsuccessful swap
         let swap_within_subchain = evm::UnsignedTransaction {
@@ -2441,58 +2443,43 @@ mod test {
             value: crate::scope::evm::lamports_to_gwei(3_000_000),
             input: precompiles::ETH_TO_VLX_CODE
                 .abi
-                .encode_input(&[ethabi::Token::FixedBytes(
-                    subchain_owner.to_bytes().to_vec(),
-                )])
+                .encode_input(&[ethabi::Token::FixedBytes(alice.to_bytes().to_vec())])
                 .unwrap(),
         }
         .sign(&bob, Some(subchain_id));
-        evm_context
-            .process_instruction(crate::send_raw_tx_subchain(
-                subchain_owner,
-                swap_within_subchain,
-                None,
-                subchain_id,
-            ))
+
+        // TODO: extract into separate test
+        assert_eq!(
+            swap_within_subchain.input,
+            [177, 214, 146, 122]
+                .into_iter()
+                .chain(alice.to_bytes())
+                .collect::<Vec<_>>()
+        );
+
+        let mut ix =
+            crate::send_raw_tx_subchain(subchain_owner, swap_within_subchain, None, subchain_id);
+
+        ix.accounts.push(AccountMeta {
+            pubkey: alice,
+            is_signer: false,
+            is_writable: true,
+        });
+
+        evm_context.process_instruction(ix).unwrap();
+
+        let alice_acc = evm_context.native_account(alice);
+        assert_eq!(alice_acc.lamports(), 4_000_000);
+        let subchain_state = evm_context.subchains.get(&subchain_id).unwrap();
+        let bob_acc = subchain_state.get_account_state(bob_addr).unwrap();
+        let native_pseudoswap_acc = subchain_state
+            .get_account_state(*precompiles::ETH_TO_VLX_ADDR)
             .unwrap();
 
-        let user_acc = evm_context.native_account(subchain_owner);
-        assert_eq!(user_acc.lamports(), 4_000_000);
+        assert_eq!(native_pseudoswap_acc.balance, lamports_to_gwei(3_000_000));
 
-        // check transfers
-
-        // let paid = 1_500_000;
-
-        // let alice = evm::SecretKey::new(&mut rand);
-        // let alice_pub = alice.to_address();
-
-        // assert!(evm_context
-        //     .process_instruction(crate::transfer_native_to_evm(user_id, paid, alice_pub))
-        //     .is_err()); // NOTE: returns error now!
-
-        // assert_eq!(
-        //     evm_context
-        //         .native_account(solana::evm_state::id())
-        //         .lamports(),
-        //     lamports_before + paid
-        // );
-        // assert_eq!(evm_context.native_account(user_id).lamports(), 0);
-        // assert!(evm_context
-        //     .process_instruction(crate::free_ownership(user_id))
-        //     .is_ok());
-        // assert_eq!(
-        //     *evm_context.native_account(user_id).owner(),
-        //     solana_sdk::system_program::id()
-        // );
-
-        // assert_eq!(
-        //     evm_context
-        //         .evm_state
-        //         .get_account_state(ether_dummy_address)
-        //         .unwrap()
-        //         .balance,
-        //     crate::scope::evm::lamports_to_gwei(1000)
-        // );
+        assert_eq!(bob_acc.balance, lamports_to_gwei(17_000_000));
+        panic!(); // TODO: fee calculation
     }
 
     #[test]

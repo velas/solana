@@ -269,9 +269,13 @@ mod evmtests {
     pub use solana_sdk::reward_type::RewardType;
     use {
         crate::bank::Bank,
-        evm_state::{AccountProvider, EvmState, FromKey, TEST_CHAIN_ID},
+        evm_state::{AccountProvider, EvmState, FromKey, H160, TEST_CHAIN_ID, U256},
         log::*,
-        solana_evm_loader_program::scope::evm::lamports_to_gwei,
+        solana_evm_loader_program::{
+            precompiles::ETH_TO_VLX_ADDR,
+            processor::SUBCHAIN_CREATION_DEPOSIT_VLX,
+            scope::evm::{gweis_to_lamports, lamports_to_gwei},
+        },
         solana_program_runtime::{evm_executor_context::StateExt, timings::ExecuteTimings},
         solana_sdk::{
             account::ReadableAccount,
@@ -1087,51 +1091,71 @@ mod evmtests {
     #[test]
     fn swap_within_subchain() {
         use {
-            solana_evm_loader_program::{
-                instructions::{EvmInstruction, ExecuteTransaction, FeePayerType},
-                precompiles,
-                scope::{evm, solana},
-            },
+            solana_evm_loader_program::{precompiles, scope::evm},
             solana_sdk::instruction::AccountMeta,
         };
 
+        fn get_gwei_balance(bank: &Bank, subchain_id: u64, addr: H160) -> U256 {
+            bank.evm()
+                .side_chains()
+                .get(&subchain_id)
+                .and_then(|e| e.state().get_account_state(addr))
+                .map(|acc| acc.balance)
+                .unwrap_or(0.into())
+        }
+
         solana_logger::setup_with("trace");
-        let tx = solana_evm_loader_program::processor::dummy_call(0).0;
-        let receiver = tx.caller().unwrap();
-        let (genesis_config, subchain_owner) = create_genesis_config(LAMPORTS_PER_VLX * 1_000_000);
+
+        let mut rand = evm_state::rand::thread_rng();
+        let alice = Pubkey::new_unique();
+        let bob = evm::SecretKey::new(&mut rand);
+        let bob_addr = bob.to_address();
+        let mint_lamports = LAMPORTS_PER_VLX * 1_001_000;
+        let subchain_creation_fee = SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX;
+        let (genesis_config, subchain_owner) = create_genesis_config(mint_lamports);
         let mut bank = Bank::new_for_tests(&genesis_config);
+        let subchain_id = 0x5677;
 
         bank.activate_feature(&feature_set::velas::native_swap_in_evm_history::id());
         bank.activate_feature(&feature_set::velas::evm_new_error_handling::id());
         bank.activate_feature(&feature_set::velas::evm_instruction_borsh_serialization::id());
+        // TODO: feature
         // bank.activate_feature(&feature_set::velas::evm_cross_execution::id());
-        let recent_hash = genesis_config.hash();
 
-        let subchain_id = 51777;
+        assert_eq!(bank.get_balance(&subchain_owner.pubkey()), mint_lamports);
+        assert_eq!(bank.get_balance(&alice), 0);
+        assert_eq!(get_gwei_balance(&bank, subchain_id, bob_addr), 0.into());
+
+        let recent_hash = genesis_config.hash();
 
         let init_subchain_tx = create_subchain_with_preseed(
             &subchain_owner,
-            receiver,
+            bob_addr,
             subchain_id,
             recent_hash,
-            20000,
+            20_000_000,
         );
 
         bank.process_transaction(&init_subchain_tx).unwrap();
+        let bank = Bank::new_from_parent(&Arc::new(bank), &Pubkey::default(), 1);
 
-        let state = match *bank.evm.chain_state(subchain_id).state() {
-            EvmState::Incomming(ref i) => i.get_account_state(receiver).unwrap_or_default(),
-            EvmState::Committed(_) => panic!(),
-        };
-
-        let mut rand = evm_state::rand::thread_rng();
-        let bob = evm::SecretKey::new(&mut rand);
-        let bob_addr = bob.to_address();
+        assert_eq!(
+            bank.get_balance(&subchain_owner.pubkey()),
+            mint_lamports - subchain_creation_fee
+        );
+        assert_eq!(
+            get_gwei_balance(&bank, subchain_id, bob_addr),
+            lamports_to_gwei(20_000_000)
+        );
+        assert_eq!(
+            get_gwei_balance(&bank, subchain_id, *ETH_TO_VLX_ADDR),
+            0.into()
+        );
 
         let swap_within_subchain = {
             let input = [177, 214, 146, 122]
                 .into_iter()
-                .chain(subchain_owner.pubkey().to_bytes())
+                .chain(alice.to_bytes())
                 .collect();
 
             let evm_tx = evm::UnsignedTransaction {
@@ -1144,17 +1168,17 @@ mod evmtests {
             }
             .sign(&bob, Some(subchain_id));
 
-            let ix = solana_evm_loader_program::create_evm_instruction_with_borsh(
-                solana_sdk::evm_loader::ID,
-                &EvmInstruction::ExecuteTransaction {
-                    tx: ExecuteTransaction::Signed { tx: Some(evm_tx) },
-                    fee_type: FeePayerType::Native,
-                },
-                vec![
-                    AccountMeta::new(solana::evm_state::ID, false),
-                    AccountMeta::new(subchain_owner.pubkey(), true),
-                ],
+            let mut ix = solana_evm_loader_program::send_raw_tx_subchain(
+                subchain_owner.pubkey(),
+                evm_tx,
+                None,
+                subchain_id,
             );
+            ix.accounts.push(AccountMeta {
+                pubkey: alice,
+                is_signer: false,
+                is_writable: true,
+            });
 
             let message = Message::new(&[ix], Some(&subchain_owner.pubkey()));
 
@@ -1163,9 +1187,16 @@ mod evmtests {
         };
 
         bank.process_transaction(&swap_within_subchain).unwrap();
+        let bank = Bank::new_from_parent(&Arc::new(bank), &Pubkey::default(), 2);
 
-        println!("{receiver}");
-
-        println!("{state:?}");
+        assert_eq!(bank.get_balance(&alice), 0);
+        assert_eq!(
+            get_gwei_balance(&bank, subchain_id, bob_addr),
+            lamports_to_gwei(17_000_000)
+        );
+        assert_eq!(
+            get_gwei_balance(&bank, subchain_id, *ETH_TO_VLX_ADDR),
+            lamports_to_gwei(3_000_000)
+        );
     }
 }
