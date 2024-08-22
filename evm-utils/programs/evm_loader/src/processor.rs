@@ -398,7 +398,7 @@ impl EvmProcessor {
             Ok(())
         }
 
-        let native_fee_payer = if subchain {
+        let native_fee_payer = if is_subchain {
             accounts.users.first().ok_or(EvmError::MissingAccount)?
         } else {
             // error is copied from old implementation in handle_transaction_result
@@ -429,7 +429,7 @@ impl EvmProcessor {
                     native_fee_payer,
                     tx.gas_price,
                     tx.gas_limit,
-                    subchain,
+                    is_subchain,
                 )?;
 
                 tx_gas_price = tx.gas_price;
@@ -442,6 +442,7 @@ impl EvmProcessor {
                 executor.transaction_execute(
                     tx,
                     withdraw_fee_from_evm,
+                    is_subchain,
                     precompiles::entrypoint(
                         accounts,
                         activate_precompile,
@@ -485,7 +486,7 @@ impl EvmProcessor {
                     native_fee_payer,
                     tx.gas_price,
                     tx.gas_limit,
-                    subchain,
+                    is_subchain,
                 )?;
                 tx_gas_price = tx.gas_price;
                 let activate_precompile = precompile_set(
@@ -498,6 +499,7 @@ impl EvmProcessor {
                     from,
                     tx,
                     withdraw_fee_from_evm,
+                    is_subchain,
                     precompiles::entrypoint(
                         accounts,
                         activate_precompile,
@@ -521,7 +523,7 @@ impl EvmProcessor {
             tx_gas_price = executor.config().burn_gas_price;
         }
 
-        if subchain {
+        if is_subchain {
             self.handle_subchain_transaction_result(
                 executor,
                 invoke_context,
