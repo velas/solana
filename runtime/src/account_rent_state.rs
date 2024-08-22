@@ -125,6 +125,7 @@ pub(crate) fn check_rent_state_with_account(
 ) -> Result<()> {
     submit_rent_state_metrics(pre_rent_state, post_rent_state);
     if !solana_sdk::incinerator::check_id(address)
+        && !solana_sdk::evm_state::check_id(address)
         && !post_rent_state.transition_allowed_from(
             pre_rent_state,
             do_support_realloc,

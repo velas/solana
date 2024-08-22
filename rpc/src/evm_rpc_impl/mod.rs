@@ -560,10 +560,10 @@ impl ChainIDERPC for ChainIDErpcImpl {
         Box::pin(async move {
             let state = block_to_state_root(chain, block, &meta).await;
 
-            let account = state
-                .unwrap()
+            let account = state?
                 .get_account_state_at(&meta, address)?
                 .unwrap_or_default();
+            log::trace!(target: "rpc", "account_state: {:?}", account);
             Ok(account.balance)
         })
     }
@@ -585,8 +585,7 @@ impl ChainIDERPC for ChainIDErpcImpl {
             let state = block_to_state_root(chain, block, &meta).await;
             let mut bytes = [0u8; 32];
             data.to_big_endian(&mut bytes);
-            let storage = state
-                .unwrap()
+            let storage = state?
                 .get_storage_at(&meta, address, H256::from_slice(&bytes))?
                 .unwrap_or_default();
             Ok(storage)
@@ -608,10 +607,11 @@ impl ChainIDERPC for ChainIDErpcImpl {
         Box::pin(async move {
             let state = block_to_state_root(chain, block, &meta).await;
 
-            let account = state
-                .unwrap()
+            let account = state?
                 .get_account_state_at(&meta, address)?
                 .unwrap_or_default();
+
+            log::trace!(target: "rpc", "account_state: {:?}", account);
             Ok(account.nonce)
         })
     }
@@ -672,8 +672,7 @@ impl ChainIDERPC for ChainIDErpcImpl {
         Box::pin(async move {
             let state = block_to_state_root(chain, block, &meta).await;
 
-            let account = state
-                .unwrap()
+            let account = state?
                 .get_account_state_at(&meta, address)?
                 .unwrap_or_default();
             Ok(Bytes(account.code.into()))
@@ -1594,7 +1593,7 @@ async fn block_by_number(
     // TODO: Inline evm_state lookups, and request only solana headers.
     let (block, confirmed) = match evm_block {
         None => {
-            error!("Error requesting block:{:?} ({:?}) not found", block, num);
+            error!(target: "rpc", "Error requesting block:{:?} ({:?}) not found", block, num);
             return Ok(None);
         }
         Some(b) => b,

@@ -2383,7 +2383,7 @@ impl Blockstore {
             Box::new(
                 self.evm_subchain_blocks_cf
                     .iter(IteratorMode::From(
-                        (subchain, 0, 0),
+                        (subchain, block_num, 0),
                         IteratorDirection::Forward,
                     ))?
                     .take_while(move |((chain_id_from_bd, _block_num, _slot), _)| {
@@ -3430,6 +3430,7 @@ impl Blockstore {
     }
 
     pub fn write_evm_block_header(&self, chain: &Chain, block: &evm::BlockHeader) -> Result<()> {
+        trace!(target: "rpc", "write_evm_block_header: {:?} for chain: {:?}", block, chain);
         let proto_block = block.clone().into();
         if let Some(chain_id) = chain {
             self.evm_subchain_blocks_cf.put_protobuf(
@@ -3657,6 +3658,7 @@ impl Blockstore {
                     )| *found_hash == hash,
                 ),
         );
+        trace!(target: "rpc", "Found transactions by hash: {:?}", transactions.len());
 
         // find first transaction with confirmed slot
         let mut confirmed_transaction_data = transactions

@@ -1,6 +1,10 @@
 use {
     crate::ChainID,
-    solana_client::rpc_config::RpcSendTransactionConfig,
+    solana_client::{
+        client_error::ClientErrorKind,
+        rpc_config::RpcSendTransactionConfig,
+        rpc_request::{RpcError, RpcResponseErrorData},
+    },
     solana_sdk::signer::{keypair, Signer},
     std::io::{Read, Write},
 };
@@ -57,15 +61,36 @@ impl super::Config {
             client.get_latest_blockhash()?,
         );
         // dry run:
-        // println!("{:?}", client.simulate_transaction(&transaction)?);
-        client.send_transaction_with_config(
-            &transaction,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        )?;
-        // client.send_and_confirm_transaction(&transaction)?;
+        // let simulation = client.simulate_transaction(&transaction)?;
+        // simulation.value.err
+        // client.send_transaction_with_config(
+        //     &transaction,
+        //     RpcSendTransactionConfig {
+        //         skip_preflight: true,
+        //         ..Default::default()
+        //     },
+        // )?;
+        client
+            .send_and_confirm_transaction(&transaction)
+            .map_err(|e| {
+                let mut output = format!("{}", e);
+
+                let ClientErrorKind::RpcError(r) = e.kind else {
+                    return output;
+                };
+                let RpcError::RpcResponseError { data, .. } = r else {
+                    return output;
+                };
+                let RpcResponseErrorData::SendTransactionPreflightFailure(p) = data else {
+                    return output;
+                };
+                for (number, log) in p.logs.iter().flatten().enumerate() {
+                    output.push_str(&format!("\nLog line{number} {}", log, number = number + 1));
+                }
+                output.push('\n');
+                output
+            })
+            .map_err(color_eyre::eyre::Error::msg)?;
         Ok(())
     }
 }

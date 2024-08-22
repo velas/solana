@@ -348,13 +348,26 @@ impl EvmBridge {
                 native_fee_used = true;
                 info!("Using Native fee for tx: {}", tx.tx_id_hash());
             }
-            solana_evm_loader_program::send_raw_tx(
-                self.key.pubkey(),
-                tx.clone(),
-                Some(self.key.pubkey()),
-                fee_type,
-            )
+            if self.subchain {
+                solana_evm_loader_program::send_raw_tx_subchain(
+                    self.key.pubkey(),
+                    tx.clone(),
+                    Some(self.key.pubkey()),
+                    self.evm_chain_id,
+                )
+            } else {
+                solana_evm_loader_program::send_raw_tx(
+                    self.key.pubkey(),
+                    tx.clone(),
+                    Some(self.key.pubkey()),
+                    fee_type,
+                )
+            }
         } else {
+            if self.subchain {
+                error!("Subchain is not supported for old encoding");
+                return vec![];
+            }
             solana_evm_loader_program::send_raw_tx_old(
                 self.key.pubkey(),
                 tx.clone(),
@@ -384,6 +397,10 @@ impl EvmBridge {
         storage_pubkey: Pubkey,
         payer_pubkey: Pubkey,
     ) -> Vec<Instruction> {
+        if self.subchain {
+            error!("Subchain is not supported for big tx");
+            return vec![];
+        }
         let mut native_fee_used = false;
         let ix = if self.borsh_encoding {
             let mut fee_type = FeePayerType::Evm;

@@ -2459,7 +2459,7 @@ impl JsonRpcRequestProcessor {
             .blockstore
             .find_evm_transaction(hash)
             .map_err(|e| {
-                warn!(
+                warn!(target:"rpc",
                     "Transaction receipt with hash = {:?} not found, e={:?}.",
                     hash, e
                 )
@@ -2484,14 +2484,13 @@ impl JsonRpcRequestProcessor {
         id: evm_state::BlockNum,
     ) -> Option<(evm_state::Block, bool)> {
         let block = self.blockstore.get_evm_block(chain, id).ok();
-        if block.is_some() {
+        if block.is_some() || chain.is_none() {
             return block;
         }
 
         let last_evm_block = self.get_last_available_evm_block(chain);
-        if chain.is_none()
-            && (last_evm_block.is_none()
-                || matches!(last_evm_block, Some(last_evm_block) if id <= last_evm_block))
+        if last_evm_block.is_none()
+            || matches!(last_evm_block, Some(last_evm_block) if id <= last_evm_block)
         {
             if let Some(bigtable_ledger_storage) = &self.bigtable_ledger_storage {
                 let bigtable_block = bigtable_ledger_storage

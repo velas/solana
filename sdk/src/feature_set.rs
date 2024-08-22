@@ -668,6 +668,7 @@ lazy_static! {
             (velas::evm_instruction_borsh_serialization::id(), "Support for Borsh serialization for EVM instructions."),
             (velas::accept_zero_gas_price_with_native_fee::id(), "Accept evm transactions with native fee and zero gas price."),
             (velas::clear_logs_on_native_error::id(), "Clear evm logs from receipt if native transaction is failed."),
+            (velas::evm_subchain::id(), "Subchain support on velas."),
             /*************** ADD NEW FEATURES HERE ***************/
         ]
     ).collect();
