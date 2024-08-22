@@ -305,13 +305,23 @@ impl EvmBridge {
 
     pub async fn is_transaction_landed(&self, hash: &H256) -> Option<bool> {
         async fn is_receipt_exists(bridge: &EvmBridge, hash: &H256) -> Option<bool> {
-            bridge
-                .rpc_client
-                .get_evm_transaction_receipt(hash)
-                .await
-                .ok()
-                .flatten()
-                .map(|_receipt| true)
+            if bridge.subchain {
+                bridge
+                    .rpc_client
+                    .get_evm_subchain_transaction_receipt(bridge.evm_chain_id, hash)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|_receipt| true)
+            } else {
+                bridge
+                    .rpc_client
+                    .get_evm_transaction_receipt(hash)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|_receipt| true)
+            }
         }
 
         async fn is_signature_exists(bridge: &EvmBridge, hash: &H256) -> Option<bool> {
@@ -487,11 +497,19 @@ impl BridgeERPC for BridgeErpcImpl {
 
             let nonce = match tx.nonce.or_else(|| meta.pool.transaction_count(&address)) {
                 Some(n) => n,
-                None => meta
-                    .rpc_client
-                    .get_evm_transaction_count(&address)
-                    .await
-                    .unwrap_or_default(),
+                None => {
+                    if meta.subchain {
+                        meta.rpc_client
+                            .get_evm_subchain_transaction_count(meta.evm_chain_id, &address)
+                            .await
+                            .unwrap_or_default()
+                    } else {
+                        meta.rpc_client
+                            .get_evm_transaction_count(&address)
+                            .await
+                            .unwrap_or_default()
+                    }
+                }
             };
 
             let tx = UnsignedTransaction {
@@ -538,11 +556,19 @@ impl BridgeERPC for BridgeErpcImpl {
 
             let nonce = match tx.nonce.or_else(|| meta.pool.transaction_count(&address)) {
                 Some(n) => n,
-                None => meta
-                    .rpc_client
-                    .get_evm_transaction_count(&address)
-                    .await
-                    .unwrap_or_default(),
+                None => {
+                    if meta.subchain {
+                        meta.rpc_client
+                            .get_evm_subchain_transaction_count(meta.evm_chain_id, &address)
+                            .await
+                            .unwrap_or_default()
+                    } else {
+                        meta.rpc_client
+                            .get_evm_transaction_count(&address)
+                            .await
+                            .unwrap_or_default()
+                    }
+                }
             };
 
             let tx_create = evm::UnsignedTransaction {

@@ -139,6 +139,8 @@ pub enum RpcRequest {
     EthTraceReplayBlock,
     // vlx methods
     VlxCall,
+    VlxGetTransactionCount,
+    VlxGetTransactionReceipt,
 
     /// Velas Account scope
     GetVelasAccountsByOperationalKey,
@@ -249,6 +251,9 @@ impl fmt::Display for RpcRequest {
             RpcRequest::EthGetLogs => "eth_getLogs",
             RpcRequest::EthSyncing => "eth_syncing",
             RpcRequest::VlxCall => "vlx_call",
+            RpcRequest::VlxGetTransactionReceipt => "vlx_getTransactionReceipt",
+
+            RpcRequest::VlxGetTransactionCount => "vlx_getTransactionCount",
             RpcRequest::GetVelasAccountsByOperationalKey => "getVelasAccountsByOperationalKey",
             RpcRequest::GetVelasAccountsByOwnerKey => "getVelasAccountsByOwnerKey",
             RpcRequest::GetVelasRelyingPartiesByOwnerKey => "getVelasRelyingPartiesByOwnerKey",

@@ -411,7 +411,12 @@ impl EvmProcessor {
             ExecuteTransaction::Signed { tx } => {
                 let tx = match tx {
                     Some(tx) => tx,
-                    None => Self::get_tx_from_storage(invoke_context, accounts, borsh_used)?,
+                    None => Self::get_tx_from_storage(
+                        invoke_context,
+                        accounts,
+                        borsh_used,
+                        is_subchain,
+                    )?,
                 };
                 ic_msg!(
                     invoke_context,
@@ -467,7 +472,12 @@ impl EvmProcessor {
                 )?;
                 let tx = match tx {
                     Some(tx) => tx,
-                    None => Self::get_tx_from_storage(invoke_context, accounts, borsh_used)?,
+                    None => Self::get_tx_from_storage(
+                        invoke_context,
+                        accounts,
+                        borsh_used,
+                        is_subchain,
+                    )?,
                 };
                 ic_msg!(
                     invoke_context,
@@ -511,7 +521,8 @@ impl EvmProcessor {
         };
 
         if executor.feature_set.is_unsigned_tx_fix_enabled() && is_big {
-            let storage = Self::get_big_transaction_storage(invoke_context, &accounts)?;
+            let storage =
+                Self::get_big_transaction_storage(invoke_context, &accounts, is_subchain)?;
             self.cleanup_storage(invoke_context, storage, sender.unwrap_or(accounts.evm))?;
         }
         if executor
@@ -651,7 +662,11 @@ impl EvmProcessor {
     ) -> Result<(), EvmError> {
         debug!("executing big_tx = {:?}", big_tx);
 
-        let mut storage = Self::get_big_transaction_storage(invoke_context, &accounts)?;
+        let mut storage = Self::get_big_transaction_storage(
+            invoke_context,
+            &accounts,
+            false, /* is_subchain */
+        )?;
         let mut tx_chunks = TxChunks::new(storage.data_as_mut_slice());
 
         match big_tx {
@@ -762,11 +777,12 @@ impl EvmProcessor {
         invoke_context: &InvokeContext,
         accounts: AccountStructure,
         deserialize_chunks_with_borsh: bool,
+        subchain: bool,
     ) -> Result<T, EvmError>
     where
         T: BorshDeserialize + DeserializeOwned,
     {
-        let mut storage = Self::get_big_transaction_storage(invoke_context, &accounts)?;
+        let mut storage = Self::get_big_transaction_storage(invoke_context, &accounts, subchain)?;
         let tx_chunks = TxChunks::new(storage.data_mut().as_mut_slice());
         debug!("Tx chunks crc = {:#x}", tx_chunks.crc());
 
@@ -788,8 +804,10 @@ impl EvmProcessor {
     fn get_big_transaction_storage<'a>(
         invoke_context: &InvokeContext,
         accounts: &'a AccountStructure,
+        subchain: bool,
     ) -> Result<RefMut<'a, AccountSharedData>, EvmError> {
-        let storage_account = accounts.first().ok_or_else(|| {
+        let idx = if subchain { 1 } else { 0 };
+        let storage_account = accounts.users.get(idx).ok_or_else(|| {
             ic_msg!(
                 invoke_context,
                 "EvmBigTransaction: No storage account found."

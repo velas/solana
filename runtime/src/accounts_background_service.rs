@@ -354,7 +354,7 @@ impl AbsRequestHandler {
                 let mut last_result = Err(evm_state::storage::Error::RootNotFound(
                     evm_state::H256::zero(),
                 ));
-                for _ in 0..3 {
+                for _ in 0..5 {
                     last_result = storage.purge_slot(pruned_slot);
                     if last_result.is_ok() {
                         break;
