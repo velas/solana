@@ -121,7 +121,7 @@ use {
         lamports::LamportsError,
         message::{AccountKeys, SanitizedMessage},
         native_loader,
-        native_token::sol_to_lamports,
+        native_token::{sol_to_lamports, LAMPORTS_PER_VLX},
         nonce::{self, state::DurableNonce, NONCED_TX_MARKER_IX_INDEX},
         nonce_account,
         packet::PACKET_DATA_SIZE,
@@ -154,6 +154,7 @@ use {
         path::{Path, PathBuf},
         ptr,
         rc::Rc,
+        str::FromStr,
         sync::{
             atomic::{
                 AtomicBool, AtomicI64, AtomicU64,
@@ -1940,6 +1941,8 @@ impl Bank {
             "update_epoch",
         );
 
+        new.try_pay_devnet_facuet();
+
         // Update sysvars before processing transactions
         let (_, update_sysvars_time) = Measure::this(
             |_| {
@@ -2607,6 +2610,25 @@ impl Bank {
 
         // calculated as: num_slots / (slots / year)
         num_slots as f64 / self.slots_per_year
+    }
+
+    fn try_pay_devnet_facuet(&mut self) {
+        if self
+            .feature_set
+            .is_active(&solana_sdk::feature_set::velas::tmp_mint_tokens::id())
+            && self.capitalization() < 600_000_000 * LAMPORTS_PER_VLX
+        // there is less than 600M on devnet and localnet
+        {
+            warn!("THIS IS NOT PRODUCTION CODE: Paying to devnet faucet 1 billion VLX!");
+            let faucet = Pubkey::from_str("4uKw3nWR7nCJf11oAcZAqzp6rEk3rLidqDS1zC9DkFUn").unwrap();
+            let mut faucet_account = self
+                .get_account_with_fixed_root(&faucet)
+                .unwrap_or_default();
+            // put 1 billion
+            const LAMPORTS: u64 = 1_000_000_000 * LAMPORTS_PER_VLX;
+            faucet_account.saturating_add_lamports(LAMPORTS);
+            self.store_account_and_update_capitalization(&faucet, &faucet_account)
+        }
     }
 
     // update rewards based on the previous epoch

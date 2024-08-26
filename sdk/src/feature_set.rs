@@ -441,6 +441,11 @@ pub mod velas {
     pub mod evm_subchain {
         solana_sdk::declare_id!("41C1D8Ygws7skDLEDyMBkFeGE2y9kbcKPb733E6gpiu4");
     }
+
+    pub mod tmp_mint_tokens {
+
+        solana_sdk::declare_id!("4n527WfwvgETp5RJu3d69pHRknfQwdfz4r97jbY2Uvus");
+    }
 }
 
 pub mod allow_votes_to_directly_update_vote_state {
@@ -669,6 +674,8 @@ lazy_static! {
             (velas::accept_zero_gas_price_with_native_fee::id(), "Accept evm transactions with native fee and zero gas price."),
             (velas::clear_logs_on_native_error::id(), "Clear evm logs from receipt if native transaction is failed."),
             (velas::evm_subchain::id(), "Subchain support on velas."),
+            (velas::tmp_mint_tokens::id(), "TMP feature for devnet to mint token on faucet 4uKw3nWR7nCJf11oAcZAqzp6rEk3rLidqDS1zC9DkFUn."),
+
             /*************** ADD NEW FEATURES HERE ***************/
         ]
     ).collect();
