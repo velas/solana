@@ -19,6 +19,7 @@ mod implementation;
 // Do you want to add optional fields? (y/n)
 // Select a token symbol:
 // RPC URL: ?
+
 #[derive(Debug, Clone, interactive_clap::InteractiveClap, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     #[interactive_clap(long)]
@@ -112,12 +113,19 @@ impl Config {
     }
 
     fn input_chain_id(_context: &()) -> color_eyre::eyre::Result<Option<u64>> {
-        match inquire::CustomType::new(
-            "Select a Chain ID (should be unique, and start with 0x56): 0x56",
-        )
-        .prompt()
+        match inquire::Text::new("Pick a Chain ID: ")
+            .with_initial_value(CHAIN_ID_PREFIX)
+            .with_placeholder(&format!("unique hex number, starts with {CHAIN_ID_PREFIX}"))
+            .prompt()
         {
-            Ok(value) => Ok(Some(value)),
+            Ok(value) if value.starts_with(CHAIN_ID_PREFIX) => {
+                let value = value.strip_prefix("0x").unwrap();
+                match u64::from_str_radix(value, 16) {
+                    Ok(chain_id) => Ok(Some(chain_id)),
+                    Err(err) => Err(err.into()),
+                }
+            }
+            Ok(_) => Ok(None),
             Err(
                 inquire::error::InquireError::OperationCanceled
                 | inquire::error::InquireError::OperationInterrupted,
@@ -263,7 +271,8 @@ pub struct Cmd {
     pub subcommand: SubCommand,
 }
 
-const CHAIN_ID_PREFIX: u64 = 0x56; // V in hex
+// this str const should start from "0x"
+const CHAIN_ID_PREFIX: &str = "0x56"; // V in hex
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChainID(u64);
