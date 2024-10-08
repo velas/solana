@@ -20,20 +20,32 @@ mod implementation;
 // Select a token symbol:
 // RPC URL: ?
 
+#[derive(Debug, Clone)]
+pub struct InputContext;
+
+impl From<()> for InputContext {
+    fn from(_value: ()) -> Self {
+        InputContext
+    }
+}
+
 #[derive(Debug, Clone, interactive_clap::InteractiveClap, serde::Serialize, serde::Deserialize)]
+#[interactive_clap(input_context = InputContext)]
 pub struct Config {
-    #[interactive_clap(long)]
     /// Choose a name for the chain:
+    #[interactive_clap(long)]
     network_name: String,
+
     /// Pick a name for the token:
     #[interactive_clap(long)]
     token_name: String,
+
     /// Select a Chain ID (should be unique, and start with 0x56): 0x56_
     #[interactive_clap(skip_default_input_arg)]
     chain_id: ChainID,
+
     /// Hardfork version (default: istanbul):
     // #[interactive_clap(skip_default_input_arg)]
-
     #[interactive_clap(long)]
     #[interactive_clap(value_enum)]
     #[interactive_clap(skip_default_input_arg)]
@@ -49,22 +61,19 @@ pub struct Config {
     #[interactive_clap(skip_default_input_arg)]
     minting_addresses: MintingAddresses,
 
-    //
     // Optional fields:
-    //
-    #[interactive_clap(long)]
-
     /// Select a token symbol:
+    #[interactive_clap(long)]
     token_symbol: String,
 
-    #[interactive_clap(long)]
     /// Provide RPC URL for future tooling:
+    #[interactive_clap(long)]
     rpc_url: String,
 }
 
 impl Config {
     fn input_minting_addresses(
-        _context: &(),
+        _context: &InputContext,
     ) -> color_eyre::eyre::Result<Option<MintingAddresses>> {
         let mut addresses = vec![];
         let mut balances = vec![];
@@ -112,7 +121,7 @@ impl Config {
         }))
     }
 
-    fn input_chain_id(_context: &()) -> color_eyre::eyre::Result<Option<u64>> {
+    fn input_chain_id(_context: &InputContext) -> color_eyre::eyre::Result<Option<u64>> {
         match inquire::Text::new("Pick a Chain ID: ")
             .with_initial_value(CHAIN_ID_PREFIX)
             .with_placeholder(&format!("unique hex number, starts with {CHAIN_ID_PREFIX}"))
@@ -134,7 +143,7 @@ impl Config {
         }
     }
 
-    fn input_hardfork(_context: &()) -> color_eyre::eyre::Result<Option<Hardfork>> {
+    fn input_hardfork(_context: &InputContext) -> color_eyre::eyre::Result<Option<Hardfork>> {
         let variants = HardforkDiscriminants::iter().collect::<Vec<_>>();
         let selected = Select::new("Hardfork version:", variants).prompt()?;
         match selected {
