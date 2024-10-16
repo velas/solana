@@ -51,8 +51,10 @@ const SENDER_PAUSE: Duration = Duration::from_secs(15);
 
 /// Threshold waiting for the status of the signature before
 /// reimporting the transaction to the pool
-/// TODO: adjust value
 const TX_REIMPORT_THRESHOLD: Duration = Duration::from_secs(30);
+
+/// Kick recoverable transaction from pool after specified retry threshold
+const RECOVERABLE_THRESHOLD: Duration = Duration::from_secs(180);
 
 #[derive(Debug)]
 pub struct CachedTransaction {
@@ -114,6 +116,10 @@ impl<C: Clock> EthPool<C> {
             after_deploy_check: Mutex::new(HashMap::new()),
             clock,
         }
+    }
+
+    pub fn now(&self) -> UnixTimeMs {
+        self.clock.now()
     }
 
     /// Imports transaction into the pool
@@ -234,7 +240,8 @@ impl<C: Clock> EthPool<C> {
             .collect()
     }
 
-    /// Drops transaction from the cache when post-deploy checks lo longer required
+    // TODO: merge two methods below
+    /// Drops transaction from the cache when post-deploy checks no longer required
     pub fn drop_from_cache(&self, hash: &H256) {
         self.after_deploy_check.lock().unwrap().remove(hash);
     }
@@ -261,6 +268,7 @@ pub struct PooledTransaction {
     sender: Address,
     hash: H256,
     hash_sender: Option<mpsc::Sender<EvmResult<H256>>>,
+    added: UnixTimeMs,
 }
 
 impl PooledTransaction {
@@ -268,6 +276,7 @@ impl PooledTransaction {
         transaction: evm::Transaction,
         meta_keys: HashSet<Pubkey>,
         hash_sender: mpsc::Sender<EvmResult<H256>>,
+        added: UnixTimeMs,
     ) -> Result<Self, evm_state::error::Error> {
         let hash = transaction.tx_id_hash();
         let sender = transaction.caller()?;
@@ -278,12 +287,14 @@ impl PooledTransaction {
             hash,
             meta_keys,
             hash_sender: Some(hash_sender),
+            added,
         })
     }
 
     pub fn reimported(
         transaction: evm::Transaction,
         meta_keys: HashSet<Pubkey>,
+        added: UnixTimeMs,
     ) -> Result<Self, evm_state::error::Error> {
         let hash = transaction.tx_id_hash();
         let sender = transaction.caller()?;
@@ -294,6 +305,7 @@ impl PooledTransaction {
             hash,
             meta_keys,
             hash_sender: None,
+            added,
         })
     }
 
@@ -395,6 +407,7 @@ pub async fn worker_deploy(bridge: Arc<EvmBridge>) {
             let nonce = pooled_tx.nonce;
             let sender = pooled_tx.sender;
             let meta_keys = pooled_tx.meta_keys.clone();
+            let added = pooled_tx.added;
             let tx = (*pooled_tx).clone();
             info!(
                 "Deploy worker is trying to process tx with hash = {:?} [tx = {:?}]",
@@ -420,20 +433,26 @@ pub async fn worker_deploy(bridge: Arc<EvmBridge>) {
                             "Found recoverable error, for tx = {:?}. Error = {}",
                             &hash, &e
                         );
-                        continue;
+                        if added + (RECOVERABLE_THRESHOLD.as_millis() as u64) >= bridge.pool.now() {
+                            debug!("Tx {:?} added at {}, scheduled for recovery", &hash, added);
+                            continue;
+                        } else {
+                            warn!("Tx {:?} kicked from pool after recovery timeout", &hash);
+                        }
+                    } else {
+                        warn!(
+                            "Something went wrong in transaction {:?}. Error = {}",
+                            &hash, &e
+                        );
                     }
 
-                    warn!(
-                        "Something went wrong in transaction {:?}. Error = {}",
-                        &hash, &e
-                    );
                     let _result = pooled_tx.send(Err(e)).await;
                 }
             }
 
             match bridge.pool.remove(&hash) {
                 Some(tx) => {
-                    info!("Transaction {} removed from the pool", tx.hash)
+                    info!("Transaction {:?} removed from the pool", tx.hash)
                 }
                 None => {
                     match bridge.pool.remove_by_nonce(&sender, nonce) {
@@ -489,9 +508,11 @@ pub async fn worker_signature_checker(bridge: Arc<EvmBridge>) {
                         match evm_tx {
                             Some(cached) => {
                                 warn!("Redeploying transaction {}", &hash);
-                                if let Ok(pooled_tx) =
-                                    PooledTransaction::reimported(cached.evm_tx, cached.meta_keys)
-                                {
+                                if let Ok(pooled_tx) = PooledTransaction::reimported(
+                                    cached.evm_tx,
+                                    cached.meta_keys,
+                                    now,
+                                ) {
                                     match bridge.pool.import(pooled_tx) {
                                         Ok(tx) => {
                                             bridge.pool.drop_from_cache(&hash);
@@ -1046,7 +1067,13 @@ mod tests {
         let secret_key: evm_state::SecretKey = evm::SecretKey::from_slice(secret_key).unwrap();
 
         let (tx, _) = mpsc::channel(1);
-        PooledTransaction::new(tx_create.sign(&secret_key, Some(111)), HashSet::new(), tx).unwrap()
+        PooledTransaction::new(
+            tx_create.sign(&secret_key, Some(111)),
+            HashSet::new(),
+            tx,
+            0,
+        )
+        .unwrap()
     }
 
     fn import(pool: &mut Pool, tx: PooledTransaction) {
