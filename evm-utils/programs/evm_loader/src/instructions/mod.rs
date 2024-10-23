@@ -1,9 +1,10 @@
 use {
     super::scope::*,
     borsh::{BorshDeserialize, BorshSchema, BorshSerialize},
-    evm_state::{Address, Transaction, UnsignedTransaction},
+    evm_state::{Address, Transaction, UnsignedTransaction, H256, U256},
     serde::{Deserialize, Serialize},
     solana_program_runtime::evm_executor_context::ChainID,
+    std::collections::BTreeMap,
 };
 
 pub mod v0;
@@ -196,7 +197,38 @@ pub enum Hardfork {
 #[derive(
     BorshSerialize,
     BorshDeserialize,
-    BorshSchema,
+    // BorshSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
+pub struct AllocAccount {
+    pub code: Vec<u8>,
+    pub storage: BTreeMap<H256, U256>,
+    pub balance: U256,
+    pub nonce: Option<u64>,
+}
+
+impl AllocAccount {
+    pub fn new_with_balance<U: Into<U256>>(gwei: U) -> Self {
+        Self {
+            code: vec![],
+            storage: BTreeMap::new(),
+            balance: gwei.into(),
+            nonce: None,
+        }
+    }
+}
+
+#[derive(
+    BorshSerialize,
+    BorshDeserialize,
+    // BorshSchema,
     Clone,
     Debug,
     PartialEq,
@@ -210,7 +242,7 @@ pub struct SubchainConfig {
     pub hardfork: Hardfork,
     pub network_name: String,
     pub token_name: String,
-    pub alloc: Vec<(Address, u64)>,
+    pub alloc: BTreeMap<Address, AllocAccount>,
 }
 impl Default for SubchainConfig {
     fn default() -> Self {
@@ -218,7 +250,7 @@ impl Default for SubchainConfig {
             hardfork: Hardfork::Istanbul,
             network_name: String::new(),
             token_name: String::new(),
-            alloc: vec![],
+            alloc: BTreeMap::new(),
         }
     }
 }
