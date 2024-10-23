@@ -1151,7 +1151,7 @@ impl EvmProcessor {
 
         drop(evm_subchain_state_borrow);
 
-        let mint_setup = config.mint.clone();
+        let mint_setup = config.alloc.clone();
         // write config into subchain state, and save owner.
         let state = crate::subchain::SubchainState::new(config, whale_pubkey);
 
@@ -2395,7 +2395,7 @@ mod test {
         // create subchain
         let subchain_config = SubchainConfig {
             hardfork: crate::instructions::Hardfork::Istanbul,
-            mint: vec![(bob_addr, 20_000_000)],
+            alloc: vec![(bob_addr, 20_000_000)],
             ..Default::default()
         };
 
@@ -3646,7 +3646,7 @@ mod test {
 
         let mut config = SubchainConfig::default();
         let evm_address = crate::evm_address_for_program(user_id);
-        config.mint.push((evm_address, 10000));
+        config.alloc.push((evm_address, 10000));
 
         setup_chain(&mut evm_context, user_id, chain_id, config, 0);
 
@@ -3682,7 +3682,7 @@ mod test {
 
         let to = crate::evm_address_for_program(user_id);
         let mut config = SubchainConfig::default();
-        config.mint.push((address, 10000));
+        config.alloc.push((address, 10000));
 
         let chain_id = 0x561;
         setup_chain(&mut evm_context, user_id, chain_id, config, 42000);
@@ -3712,7 +3712,7 @@ mod test {
 
         let to = crate::evm_address_for_program(user_id);
         let mut config = SubchainConfig::default();
-        config.mint.push((address, 10000));
+        config.alloc.push((address, 10000));
 
         let chain_id = 0x561;
         setup_chain(&mut evm_context, user_id, chain_id, config, 1);
@@ -3753,9 +3753,9 @@ mod test {
 
         assert_eq!(
             subchain_evm.get_executed_transactions().len(),
-            config.mint.len()
+            config.alloc.len()
         );
-        for (evm_address, balance) in config.mint {
+        for (evm_address, balance) in config.alloc {
             let evm_acc_on_sub = subchain_evm.get_account_state(evm_address).unwrap();
             assert_eq!(evm_acc_on_sub.balance, lamports_to_gwei(balance));
         }
@@ -3860,7 +3860,7 @@ mod test {
 
         let to = crate::evm_address_for_program(user_id);
         let mut config = SubchainConfig::default();
-        config.mint.push((address, 10000));
+        config.alloc.push((address, 10000));
 
         let chain_id = 0x561;
         setup_chain(&mut evm_context, user_id, chain_id, config, 42000 * 3);
