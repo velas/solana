@@ -1,8 +1,10 @@
-use super::scope::*;
-use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
-use evm_state::{Address, Transaction, UnsignedTransaction};
-use serde::{Deserialize, Serialize};
-use solana_program_runtime::evm_executor_context::ChainID;
+use {
+    super::scope::*,
+    borsh::{BorshDeserialize, BorshSchema, BorshSerialize},
+    evm_state::{Address, Transaction, UnsignedTransaction},
+    serde::{Deserialize, Serialize},
+    solana_program_runtime::evm_executor_context::ChainID,
+};
 
 pub mod v0;
 
@@ -208,7 +210,7 @@ pub struct SubchainConfig {
     pub hardfork: Hardfork,
     pub network_name: String,
     pub token_name: String,
-    pub mint: Vec<(Address, u64)>,
+    pub alloc: Vec<(Address, u64)>,
 }
 impl Default for SubchainConfig {
     fn default() -> Self {
@@ -216,7 +218,7 @@ impl Default for SubchainConfig {
             hardfork: Hardfork::Istanbul,
             network_name: String::new(),
             token_name: String::new(),
-            mint: vec![],
+            alloc: vec![],
         }
     }
 }
@@ -386,12 +388,13 @@ impl From<EvmInstruction> for v0::EvmInstruction {
 #[cfg(test)]
 mod test {
 
-    use super::*;
-
-    use evm_state::{H160, H256};
-    use quickcheck::{Arbitrary, Gen};
-    use quickcheck_macros::quickcheck;
-    use std::str::FromStr;
+    use {
+        super::*,
+        evm_state::{H160, H256},
+        quickcheck::{Arbitrary, Gen},
+        quickcheck_macros::quickcheck,
+        std::str::FromStr,
+    };
 
     #[derive(Clone, Debug)]
     struct Generator<T>(T);

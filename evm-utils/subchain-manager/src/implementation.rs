@@ -30,7 +30,7 @@ impl super::Config {
         client: &solana_client::rpc_client::RpcClient,
     ) -> Result<(), color_eyre::eyre::Error> {
         let chain_id = self.chain_id.0;
-        let mint: Vec<(_, u64)> = self
+        let alloc: Vec<(_, u64)> = self
             .minting_addresses
             .address
             .iter()
@@ -48,7 +48,7 @@ impl super::Config {
                     solana_evm_loader_program::instructions::Hardfork::Istanbul
                 }
             },
-            mint,
+            alloc,
         };
         let owner = keypair.pubkey();
         let ix = solana_evm_loader_program::create_evm_subchain_account(owner, chain_id, config);

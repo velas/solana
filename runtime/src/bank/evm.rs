@@ -962,7 +962,7 @@ mod evmtests {
     ) -> Transaction {
         let mut config: solana_evm_loader_program::instructions::SubchainConfig =
             Default::default();
-        config.mint.push((receiver, lamports.into()));
+        config.alloc.push((receiver, lamports.into()));
         let from_pubkey = from_keypair.pubkey();
         let instruction =
             solana_evm_loader_program::create_evm_subchain_account(from_pubkey, chain_id, config);

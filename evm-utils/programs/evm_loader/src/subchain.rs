@@ -94,7 +94,7 @@ mod test {
             hardfork: Hardfork::Istanbul,
             network_name: "test".to_string(),
             token_name: "test".to_string(),
-            mint: vec![(H160::zero(), 12)],
+            alloc: vec![(H160::zero(), 12)],
         };
         let mut state = SubchainState::new(config, solana::Address::default());
         state.update(|h| h.push(H256::repeat_byte(0x11), 12));
