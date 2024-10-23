@@ -1187,8 +1187,8 @@ impl EvmProcessor {
         // TODO: Drop executor on error?
         // Load pre-seed
 
-        for (evm_address, lamports) in &mint_setup {
-            let gweis = lamports_to_gwei(*lamports);
+        for (evm_address, account) in &mint_setup {
+            let gweis = lamports_to_gwei(account.balance);
             executor.deposit(*evm_address, gweis);
             executor.register_swap_tx_in_evm(SUBCHAIN_MINT_ADDRES, *evm_address, gweis);
         }
@@ -1287,6 +1287,7 @@ pub fn dummy_call(nonce: usize) -> (evm::Transaction, evm::UnsignedTransaction) 
 mod test {
     use {
         super::*,
+        crate::instructions::AllocAccount,
         evm_state::{
             transactions::{TransactionAction, TransactionSignature},
             AccountProvider, AccountState, ExitReason, ExitSucceed, FromKey, BURN_GAS_PRICE,
@@ -2390,12 +2391,12 @@ mod test {
         subchain_owner_acc.set_lamports(SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX + 777);
         evm_context.deposit_evm(bob_addr, lamports_to_gwei(10_000_000));
 
-        let subchain_id = 0x5677;
-
         // create subchain
+        let subchain_id = 0x5677;
+        let alloc = BTreeMap::from_iter([(bob_addr, AllocAccount::new_with_balance(20_000_000))]);
         let subchain_config = SubchainConfig {
             hardfork: crate::instructions::Hardfork::Istanbul,
-            alloc: vec![(bob_addr, 20_000_000)],
+            alloc,
             ..Default::default()
         };
 
@@ -3646,7 +3647,9 @@ mod test {
 
         let mut config = SubchainConfig::default();
         let evm_address = crate::evm_address_for_program(user_id);
-        config.alloc.push((evm_address, 10000));
+        config
+            .alloc
+            .insert(evm_address, AllocAccount::new_with_balance(10000));
 
         setup_chain(&mut evm_context, user_id, chain_id, config, 0);
 
@@ -3682,7 +3685,9 @@ mod test {
 
         let to = crate::evm_address_for_program(user_id);
         let mut config = SubchainConfig::default();
-        config.alloc.push((address, 10000));
+        config
+            .alloc
+            .insert(address, AllocAccount::new_with_balance(10000));
 
         let chain_id = 0x561;
         setup_chain(&mut evm_context, user_id, chain_id, config, 42000);
@@ -3712,7 +3717,9 @@ mod test {
 
         let to = crate::evm_address_for_program(user_id);
         let mut config = SubchainConfig::default();
-        config.alloc.push((address, 10000));
+        config
+            .alloc
+            .insert(address, AllocAccount::new_with_balance(10000));
 
         let chain_id = 0x561;
         setup_chain(&mut evm_context, user_id, chain_id, config, 1);
@@ -3755,9 +3762,9 @@ mod test {
             subchain_evm.get_executed_transactions().len(),
             config.alloc.len()
         );
-        for (evm_address, balance) in config.alloc {
+        for (evm_address, account) in config.alloc {
             let evm_acc_on_sub = subchain_evm.get_account_state(evm_address).unwrap();
-            assert_eq!(evm_acc_on_sub.balance, lamports_to_gwei(balance));
+            assert_eq!(evm_acc_on_sub.balance, lamports_to_gwei(account.balance));
         }
     }
 
@@ -3860,7 +3867,9 @@ mod test {
 
         let to = crate::evm_address_for_program(user_id);
         let mut config = SubchainConfig::default();
-        config.alloc.push((address, 10000));
+        config
+            .alloc
+            .insert(address, AllocAccount::new_with_balance(10000));
 
         let chain_id = 0x561;
         setup_chain(&mut evm_context, user_id, chain_id, config, 42000 * 3);

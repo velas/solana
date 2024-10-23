@@ -23,8 +23,8 @@ pub mod scope {
         pub type Gwei = U256;
 
         /// Convert lamports to gwei
-        pub fn lamports_to_gwei(lamports: Lamports) -> Gwei {
-            U256::from(lamports) * U256::from(GWEI_PER_LAMPORT)
+        pub fn lamports_to_gwei<LAMPORTS: Into<U256>>(lamports: LAMPORTS) -> Gwei {
+            lamports.into() * U256::from(GWEI_PER_LAMPORT)
         }
 
         /// Converts gweis back to lamports, returns remainder as second element.

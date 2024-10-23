@@ -82,10 +82,11 @@ mod test {
     use {
         super::SubchainState,
         crate::{
-            instructions::{Hardfork, SubchainConfig},
+            instructions::{AllocAccount, Hardfork, SubchainConfig},
             solana,
         },
         evm_state::{H160, H256},
+        std::collections::BTreeMap,
     };
 
     #[test]
@@ -94,7 +95,7 @@ mod test {
             hardfork: Hardfork::Istanbul,
             network_name: "test".to_string(),
             token_name: "test".to_string(),
-            alloc: vec![(H160::zero(), 12)],
+            alloc: BTreeMap::from_iter([(H160::zero(), AllocAccount::new_with_balance(12))]),
         };
         let mut state = SubchainState::new(config, solana::Address::default());
         state.update(|h| h.push(H256::repeat_byte(0x11), 12));

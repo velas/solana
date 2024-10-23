@@ -271,8 +271,8 @@ mod evmtests {
         evm_state::{AccountProvider, EvmState, FromKey, H160, TEST_CHAIN_ID, U256},
         log::*,
         solana_evm_loader_program::{
-            precompiles::ETH_TO_VLX_ADDR, processor::SUBCHAIN_CREATION_DEPOSIT_VLX,
-            scope::evm::lamports_to_gwei,
+            instructions::AllocAccount, precompiles::ETH_TO_VLX_ADDR,
+            processor::SUBCHAIN_CREATION_DEPOSIT_VLX, scope::evm::lamports_to_gwei,
         },
         solana_program_runtime::{evm_executor_context::StateExt, timings::ExecuteTimings},
         solana_sdk::{
@@ -962,7 +962,9 @@ mod evmtests {
     ) -> Transaction {
         let mut config: solana_evm_loader_program::instructions::SubchainConfig =
             Default::default();
-        config.alloc.push((receiver, lamports.into()));
+        config
+            .alloc
+            .insert(receiver, AllocAccount::new_with_balance(lamports));
         let from_pubkey = from_keypair.pubkey();
         let instruction =
             solana_evm_loader_program::create_evm_subchain_account(from_pubkey, chain_id, config);
