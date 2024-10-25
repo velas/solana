@@ -30,6 +30,7 @@ impl super::Config {
         client: &solana_client::rpc_client::RpcClient,
     ) -> Result<(), color_eyre::eyre::Error> {
         let chain_id = self.chain_id.0;
+        // TODO: replace Vec<(_, u64)> with BTreeMap<H160, solana_evm_loader_program::instructions::AllocAccount>
         let alloc: Vec<(_, u64)> = self
             .minting_addresses
             .address
