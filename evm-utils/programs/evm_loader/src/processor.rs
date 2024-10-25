@@ -1341,13 +1341,13 @@ mod test {
     }
 
     impl EvmMockContext {
-        fn new(evm_balance: u64) -> Self {
+        fn new(lamports: u64) -> Self {
             let _logger = simple_logger::SimpleLogger::new()
                 .with_utc_timestamps()
                 .init();
             Self {
                 evm_state: evm_state::EvmBackend::default(),
-                evm_state_account: crate::create_state_account(evm_balance),
+                evm_state_account: crate::create_state_account(lamports),
                 evm_program_account: AccountSharedData::new(1, 0, &native_loader::ID),
                 subchains: HashMap::new(),
                 rest_accounts: [(
@@ -2379,28 +2379,33 @@ mod test {
     fn swap_evm_to_vlx_within_different_chains() {
         // prepare context
         let mut evm_context = EvmMockContext::new(12_000_000);
-        // TODO: feature activation
 
         // create accounts
         let mut rand: evm_state::rand::prelude::ThreadRng = evm_state::rand::thread_rng();
         let subchain_owner = Pubkey::new_unique();
-        let alice = Pubkey::new_unique();
         let subchain_owner_acc = evm_context.native_account(subchain_owner);
+        let alice = Pubkey::new_unique();
         let bob = evm::SecretKey::new(&mut rand); // SECRET_KEY_DUMMY
         let bob_addr = bob.to_address();
         subchain_owner_acc.set_lamports(SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX + 777);
         evm_context.deposit_evm(bob_addr, lamports_to_gwei(10_000_000));
 
-        // create subchain
         let subchain_id = 0x5677;
+
+        // create subchain
         let subchain_config = SubchainConfig {
             hardfork: crate::instructions::Hardfork::Istanbul,
             mint: vec![(bob_addr, 20_000_000)],
             ..Default::default()
         };
-        let create_subchain_ix =
-            crate::create_evm_subchain_account(subchain_owner, subchain_id, subchain_config);
-        evm_context.process_instruction(create_subchain_ix).unwrap();
+
+        setup_chain(
+            &mut evm_context,
+            subchain_owner,
+            subchain_id,
+            subchain_config,
+            42_000_000,
+        );
 
         // empty native balance after subchain cration fee
         let subchain_owner_acc = evm_context.native_account(subchain_owner);
@@ -2432,9 +2437,6 @@ mod test {
         }
         .sign(&bob, Some(TEST_CHAIN_ID));
 
-        // error!("subchain_owner: {:?}", subchain_owner);
-        // error!("subchain_owner2: {:?}", subchain_owner.to_bytes());
-        // error!("INPUT: {:?}", &swap_within_mainchain.input);
         let mut ix = crate::send_raw_tx(
             subchain_owner,
             swap_within_mainchain,
@@ -2495,8 +2497,8 @@ mod test {
 
         assert_eq!(native_pseudoswap_acc.balance, lamports_to_gwei(3_000_000));
 
-        assert_eq!(bob_acc.balance, lamports_to_gwei(17_000_000));
-        panic!(); // TODO: fee calculation
+        let fee_lamports = 42408;
+        assert_eq!(bob_acc.balance, lamports_to_gwei(17_000_000 - fee_lamports));
     }
 
     #[test]
@@ -3729,7 +3731,7 @@ mod test {
         owner: solana::Address,
         chain_id: u64,
         config: SubchainConfig,
-        extra_deposit: u64,
+        extra_lamports: u64,
     ) {
         evm_context.feature_set.activate(
             &solana_sdk::feature_set::velas::evm_subchain::id(),
@@ -3745,7 +3747,7 @@ mod test {
 
         let subchain_pubkey = crate::evm_state_subchain_account(chain_id);
         let subchain_state_account = evm_context.native_account(subchain_pubkey);
-        subchain_state_account.set_lamports(subchain_state_account.lamports() + extra_deposit);
+        subchain_state_account.set_lamports(subchain_state_account.lamports() + extra_lamports);
 
         let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
 
