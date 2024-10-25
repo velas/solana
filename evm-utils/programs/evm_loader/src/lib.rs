@@ -22,12 +22,12 @@ pub mod scope {
         pub type Lamports = u64;
         pub type Gwei = U256;
 
-        // Convert lamports to gwei
+        /// Convert lamports to gwei
         pub fn lamports_to_gwei(lamports: Lamports) -> Gwei {
             U256::from(lamports) * U256::from(GWEI_PER_LAMPORT)
         }
 
-        // Convert gweis back to lamports, return change as second element.
+        /// Converts gweis back to lamports, returns remainder as second element.
         pub fn gweis_to_lamports(gweis: Gwei) -> (Lamports, Gwei) {
             let lamports = gweis / U256::from(GWEI_PER_LAMPORT);
             let remainder = gweis % U256::from(GWEI_PER_LAMPORT);
