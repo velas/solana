@@ -209,7 +209,7 @@ pub enum Hardfork {
 )]
 pub struct AllocAccount {
     pub code: Vec<u8>,
-    pub storage: BTreeMap<H256, U256>,
+    pub storage: BTreeMap<H256, H256>,
     pub balance: U256,
     pub nonce: Option<u64>,
 }

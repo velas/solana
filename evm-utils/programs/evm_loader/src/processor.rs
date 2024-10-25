@@ -11,9 +11,10 @@ use {
         scope::*,
         tx_chunks::TxChunks,
     },
+    crate::instructions::AllocAccount,
     borsh::BorshDeserialize,
     evm::{gweis_to_lamports, lamports_to_gwei, Executor, ExitReason},
-    evm_state::{ExecutionResult, H160, U256},
+    evm_state::{ExecutionResult, MemoryAccount, H160, U256},
     log::*,
     serde::de::DeserializeOwned,
     solana_program_runtime::{
@@ -35,7 +36,7 @@ use {
 pub const BURN_ADDR: evm_state::H160 = evm_state::H160::zero();
 
 pub const SUBCHAIN_CREATION_DEPOSIT_VLX: u64 = 1_000_000;
-const SUBCHAIN_MINT_ADDRES: H160 = H160::repeat_byte(0x11);
+const SUBCHAIN_MINT_ADDRESS: H160 = H160::repeat_byte(0x11);
 
 /// Return the next AccountInfo or a NotEnoughAccountKeys error
 pub fn next_account_info<'a, 'b, I: Iterator<Item = &'a KeyedAccount<'b>>>(
@@ -272,6 +273,7 @@ impl EvmProcessor {
             Err(err)
         })
     }
+
     fn process_subchain_instruction(
         &self,
         invoke_context: &mut InvokeContext,
@@ -1151,7 +1153,35 @@ impl EvmProcessor {
 
         drop(evm_subchain_state_borrow);
 
-        let mint_setup = config.alloc.clone();
+        let alloc: Vec<(H160, MemoryAccount)> = config
+            .alloc
+            .iter()
+            .map(|(evm_address, account)| {
+                let AllocAccount {
+                    code,
+                    storage,
+                    balance,
+                    nonce,
+                } = account;
+
+                let balance = lamports_to_gwei(balance); // FIXME?: WHY CONVERT?
+
+                let nonce = nonce.unwrap_or(0).into();
+                let code = code.clone();
+                let storage = storage.clone();
+
+                (
+                    *evm_address,
+                    MemoryAccount {
+                        nonce,
+                        balance,
+                        storage,
+                        code,
+                    },
+                )
+            })
+            .collect();
+
         // write config into subchain state, and save owner.
         let state = crate::subchain::SubchainState::new(config, whale_pubkey);
 
@@ -1187,11 +1217,12 @@ impl EvmProcessor {
         // TODO: Drop executor on error?
         // Load pre-seed
 
-        for (evm_address, account) in &mint_setup {
-            let gweis = lamports_to_gwei(account.balance);
-            executor.deposit(*evm_address, gweis);
-            executor.register_swap_tx_in_evm(SUBCHAIN_MINT_ADDRES, *evm_address, gweis);
+        executor.evm_backend.set_initial(alloc.clone());
+
+        for (evm_address, account) in alloc {
+            executor.register_swap_tx_in_evm(SUBCHAIN_MINT_ADDRESS, evm_address, account.balance);
         }
+
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
         // serialize data into account.
         state.save(accounts)
