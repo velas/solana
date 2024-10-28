@@ -1,7 +1,7 @@
 use {
     super::scope::*,
     borsh::{BorshDeserialize, BorshSchema, BorshSerialize},
-    evm_state::{Address, Transaction, UnsignedTransaction, H256, U256},
+    evm_state::{Address, MemoryAccount, Transaction, UnsignedTransaction, H256, U256},
     serde::{Deserialize, Serialize},
     solana_program_runtime::evm_executor_context::ChainID,
     std::collections::BTreeMap,
@@ -221,6 +221,17 @@ impl AllocAccount {
             storage: BTreeMap::new(),
             balance: wei,
             nonce: None,
+        }
+    }
+}
+
+impl From<AllocAccount> for MemoryAccount {
+    fn from(value: AllocAccount) -> Self {
+        MemoryAccount {
+            nonce: value.nonce.unwrap_or(0).into(),
+            balance: value.balance,
+            storage: value.storage,
+            code: value.code,
         }
     }
 }
