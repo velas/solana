@@ -1040,6 +1040,7 @@ mod evmtests {
         // 10. bank.freeze()
         // 11. check_roots() != 9
     }
+
     #[test]
     fn create_evm_subchain_regular() {
         solana_logger::setup_with("trace");
@@ -1051,21 +1052,23 @@ mod evmtests {
         bank.activate_feature(&feature_set::velas::native_swap_in_evm_history::id());
         bank.activate_feature(&feature_set::velas::evm_new_error_handling::id());
         bank.activate_feature(&feature_set::velas::evm_instruction_borsh_serialization::id());
+        bank.activate_feature(&feature_set::velas::evm_subchain::id());
         let bank = Arc::new(bank);
         let recent_hash = genesis_config.hash();
 
+        let test_chain_id = 0x5677;
         let tx = create_subchain_with_preseed(
             &mint_keypair,
             receiver,
-            TEST_CHAIN_ID + 1,
+            test_chain_id,
             recent_hash,
             20000,
         );
         let _res = bank.process_transaction(&tx).unwrap();
 
-        let hash_before = bank.evm.chain_state(TEST_CHAIN_ID + 1).state().last_root();
+        let hash_before = bank.evm.chain_state(test_chain_id).state().last_root();
 
-        let state = match *bank.evm.chain_state(TEST_CHAIN_ID + 1).state() {
+        let state = match *bank.evm.chain_state(test_chain_id).state() {
             EvmState::Incomming(ref i) => i.get_account_state(receiver).unwrap_or_default(),
             EvmState::Committed(_) => panic!(),
         };
@@ -1078,7 +1081,7 @@ mod evmtests {
         // check that revert keep tx in history, but balances are set to zero
         assert_eq!(evm_state.processed_tx_len(), 0);
 
-        let subchain_evm_state = bank.evm.chain_state(TEST_CHAIN_ID + 1).state();
+        let subchain_evm_state = bank.evm.chain_state(test_chain_id).state();
         log::debug!("subchain_evm_state: {:?}", *subchain_evm_state);
         assert_eq!(subchain_evm_state.processed_tx_len(), 1);
         let account = bank.get_account(&mint_keypair.pubkey()).unwrap_or_default();
@@ -1089,14 +1092,14 @@ mod evmtests {
             .unwrap_or_default();
         assert_eq!(state.balance, lamports_to_wei(20000));
 
-        let hash_after = bank.evm.chain_state(TEST_CHAIN_ID + 1).state().last_root();
+        let hash_after = bank.evm.chain_state(test_chain_id).state().last_root();
         // hash updated with nonce increasing
         assert_ne!(hash_before, hash_after);
 
         // check that bank can be created from parent
         let bank2 = Bank::new_from_parent(&bank, &solana_sdk::pubkey::new_rand(), 1);
         bank2.freeze();
-        let new_hash = bank2.evm.chain_state(TEST_CHAIN_ID + 1).state().last_root();
+        let new_hash = bank2.evm.chain_state(test_chain_id).state().last_root();
 
         assert_eq!(new_hash, hash_after);
     }
@@ -1203,10 +1206,11 @@ mod evmtests {
         bank.freeze();
         let bank = Bank::new_from_parent(&Arc::new(bank), &Pubkey::default(), 2);
 
+        let fee = 42408;
         assert_eq!(bank.get_balance(&alice), 0);
         assert_eq!(
             get_wei_balance(&bank, subchain_id, bob_addr),
-            lamports_to_wei(17_000_000)
+            lamports_to_wei(17_000_000 - fee)
         );
         assert_eq!(
             get_wei_balance(&bank, subchain_id, *ETH_TO_VLX_ADDR),
