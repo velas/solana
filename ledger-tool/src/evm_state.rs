@@ -1,24 +1,26 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::atomic::AtomicU64,
-};
-
-use anyhow::{ensure, Result};
-use clap::{value_t_or_exit, App, AppSettings, Arg, ArgMatches, SubCommand};
-use log::*;
-use solana_clap_utils::ArgConstant;
-
-use evm_state::{storage::{
-    inspectors::verifier::{AccountsVerifier, HashVerifier},
-    inspectors::NoopInspector,
-    walker::Walker,
-}, StorageSecondary};
-use rayon::prelude::*;
-
-use evm_state::{
-    storage::cleaner,
-    storage::{inspectors, Storage},
-    H256,
+use {
+    anyhow::{ensure, Result},
+    clap::{value_t_or_exit, App, AppSettings, Arg, ArgMatches, SubCommand},
+    evm_state::{
+        storage::{
+            cleaner,
+            inspectors::{
+                self,
+                verifier::{AccountsVerifier, HashVerifier},
+                NoopInspector,
+            },
+            walker::Walker,
+            Storage,
+        },
+        StorageSecondary, H256,
+    },
+    log::*,
+    rayon::prelude::*,
+    solana_clap_utils::ArgConstant,
+    std::{
+        path::{Path, PathBuf},
+        sync::atomic::AtomicU64,
+    },
 };
 // use rayon::prelude::*;
 
@@ -130,8 +132,7 @@ pub fn process_evm_state_command(evm_state_path: &Path, matches: &ArgMatches<'_>
     Ok(())
 }
 
- fn primary_evm_state_command(storage: Storage, matches: &ArgMatches<'_>) -> Result<()> {
-
+fn primary_evm_state_command(storage: Storage, matches: &ArgMatches<'_>) -> Result<()> {
     match matches.subcommand() {
         ("purge", Some(matches)) => {
             let root = value_t_or_exit!(matches, ROOT_ARG.name, H256);
@@ -232,7 +233,6 @@ pub fn process_evm_state_command(evm_state_path: &Path, matches: &ArgMatches<'_>
 }
 
 fn secondary_evm_state_command(storage: StorageSecondary, matches: &ArgMatches<'_>) -> Result<()> {
-
     match matches.subcommand() {
         ("list-roots", Some(_)) => {
             storage.list_roots()?;
@@ -258,8 +258,7 @@ impl BalanceCounter {
 use evm_state::storage::inspectors::DataInspector;
 impl DataInspector<H256, Account> for BalanceCounter {
     fn inspect_data(&self, _key: H256, account: Account) -> Result<()> {
-        let (lamports, _) =
-            solana_evm_loader_program::scope::evm::gweis_to_lamports(account.balance);
+        let lamports = solana_evm_loader_program::scope::evm::wei_to_lamports(account.balance).0;
         self.balance
             .fetch_add(lamports, std::sync::atomic::Ordering::Relaxed);
         Ok(())

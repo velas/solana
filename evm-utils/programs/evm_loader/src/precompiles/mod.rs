@@ -224,7 +224,7 @@ pub fn post_handle_logs(accounts: AccountStructure<'_>, logs: &mut Vec<Log>) -> 
 mod test {
     use {
         super::*,
-        crate::scope::evm::lamports_to_gwei,
+        crate::scope::evm::lamports_to_wei,
         evm_state::{ExitError, ExitSucceed},
         hex_literal::hex,
         primitive_types::U256,
@@ -313,7 +313,7 @@ mod test {
         let cx = Context {
             address: H160::from_str("56454c41532d434841494e000000000053574150").unwrap(),
             caller: H160::from_str("56454c41532d434841494e000000000053574150").unwrap(),
-            apparent_value: lamports_to_gwei(1),
+            apparent_value: lamports_to_wei(1),
         };
         AccountStructure::testing(0, |accounts: AccountStructure| {
             let precompiles = entrypoint(accounts, PrecompileSet::No, false, false);
@@ -358,7 +358,7 @@ mod test {
         let cx = Context {
             address: H160::from_str("56454c41532d434841494e000000000053574150").unwrap(),
             caller: H160::from_str("56454c41532d434841494e000000000053574150").unwrap(),
-            apparent_value: lamports_to_gwei(1),
+            apparent_value: lamports_to_wei(1),
         };
         AccountStructure::testing(0, |accounts: AccountStructure| {
             let precompiles = entrypoint(accounts, PrecompileSet::No, false, false);
@@ -419,7 +419,7 @@ mod test {
         let cx = Context {
             address: H160::from_str("0000000000000000000000000000000000000002").unwrap(),
             caller: H160::from_str("0000000000000000000000000000000000000002").unwrap(),
-            apparent_value: lamports_to_gwei(1),
+            apparent_value: lamports_to_wei(1),
         };
         AccountStructure::testing(0, |accounts: AccountStructure| {
             let precompiles = entrypoint(accounts, PrecompileSet::VelasClassic, false, false);
@@ -450,7 +450,7 @@ mod test {
         let cx = Context {
             address: H160::from_str("0000000000000000000000000000000000000004").unwrap(),
             caller: H160::from_str("0000000000000000000000000000000000000004").unwrap(),
-            apparent_value: lamports_to_gwei(1),
+            apparent_value: lamports_to_wei(1),
         };
         AccountStructure::testing(0, |accounts: AccountStructure| {
             let precompiles = entrypoint(accounts, PrecompileSet::VelasClassic, false, false);
@@ -487,7 +487,7 @@ mod test {
         let cx = Context {
             address: H160::from_str("0000000000000000000000000000000000000003").unwrap(),
             caller: H160::from_str("0000000000000000000000000000000000000003").unwrap(),
-            apparent_value: lamports_to_gwei(1),
+            apparent_value: lamports_to_wei(1),
         };
         AccountStructure::testing(0, |accounts: AccountStructure| {
             let precompiles = entrypoint(accounts, PrecompileSet::VelasClassic, false, false);
@@ -516,7 +516,7 @@ mod test {
         let cx = Context {
             address: H160::from_str("0000000000000000000000000000000000000001").unwrap(),
             caller: H160::from_str("0000000000000000000000000000000000000001").unwrap(),
-            apparent_value: lamports_to_gwei(1),
+            apparent_value: lamports_to_wei(1),
         };
         AccountStructure::testing(0, |accounts: AccountStructure| {
             let precompiles = entrypoint(accounts, PrecompileSet::VelasClassic, false, false);
@@ -565,7 +565,7 @@ mod test {
         let cx = Context {
             address: H160::from_str("0000000000000000000000000000000000000005").unwrap(),
             caller: H160::from_str("0000000000000000000000000000000000000005").unwrap(),
-            apparent_value: lamports_to_gwei(1),
+            apparent_value: lamports_to_wei(1),
         };
 
         // // test for potential exp len overflow
@@ -712,7 +712,7 @@ mod test {
         let cx = Context {
             address: H160::from_str("0000000000000000000000000000000000000005").unwrap(),
             caller: H160::from_str("0000000000000000000000000000000000000005").unwrap(),
-            apparent_value: lamports_to_gwei(1),
+            apparent_value: lamports_to_wei(1),
         };
 
         AccountStructure::testing(0, |accounts| {

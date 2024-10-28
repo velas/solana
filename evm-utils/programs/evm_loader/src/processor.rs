@@ -13,7 +13,7 @@ use {
     },
     crate::instructions::AllocAccount,
     borsh::BorshDeserialize,
-    evm::{gweis_to_lamports, lamports_to_gwei, Executor, ExitReason},
+    evm::{wei_to_lamports, Executor, ExitReason},
     evm_state::{ExecutionResult, MemoryAccount, H160, U256},
     log::*,
     serde::de::DeserializeOwned,
@@ -369,7 +369,7 @@ impl EvmProcessor {
                     (tx_gas_price, 0)
                 };
                 let max_fee = max_fee * tx_gas_limit;
-                let max_fee_in_lamports = gweis_to_lamports(max_fee);
+                let max_fee_in_lamports = wei_to_lamports(max_fee);
                 let Some(amount) = fee_payer
                     .account
                     .borrow()
@@ -602,7 +602,7 @@ impl EvmProcessor {
         evm_address: evm::Address,
         register_swap_tx_in_evm: bool,
     ) -> Result<(), EvmError> {
-        let gweis = evm::lamports_to_gwei(lamports);
+        let wei = evm::lamports_to_wei(lamports);
         let user = accounts.first().ok_or_else(|| {
             ic_msg!(
                 invoke_context,
@@ -649,9 +649,9 @@ impl EvmProcessor {
 
         let evm_account_lamports = evm_account.lamports().saturating_add(lamports);
         evm_account.set_lamports(evm_account_lamports);
-        executor.deposit(evm_address, gweis);
+        executor.deposit(evm_address, wei);
         if register_swap_tx_in_evm {
-            executor.register_swap_tx_in_evm(*precompiles::ETH_TO_VLX_ADDR, evm_address, gweis)
+            executor.register_swap_tx_in_evm(*precompiles::ETH_TO_VLX_ADDR, evm_address, wei)
         }
         Ok(())
     }
@@ -849,7 +849,7 @@ impl EvmProcessor {
     ) -> Result<(), EvmError> {
         // Charge only when transaction succeeded
         if matches!(tx_result.exit_reason, ExitReason::Succeed(_)) {
-            let (fee, _) = gweis_to_lamports(fee);
+            let (fee, _) = wei_to_lamports(fee);
 
             trace!("Charging account for fee {}", fee);
             let mut account_data = native_account
@@ -1001,7 +1001,7 @@ impl EvmProcessor {
         let charge_from_native = full_fee;
         let return_to_zero_addr = burn_fee;
 
-        let (refund_native_fee, _) = gweis_to_lamports(refund_fee);
+        let (refund_native_fee, _) = wei_to_lamports(refund_fee);
 
         // 1. Fee can be charged from evm account or native. (evm part is done in Executor::transaction_execute* methods.)
         if !withdraw_fee_from_evm {
@@ -1164,8 +1164,6 @@ impl EvmProcessor {
                     nonce,
                 } = account;
 
-                let balance = lamports_to_gwei(balance); // FIXME?: WHY CONVERT?
-
                 let nonce = nonce.unwrap_or(0).into();
                 let code = code.clone();
                 let storage = storage.clone();
@@ -1174,7 +1172,7 @@ impl EvmProcessor {
                     *evm_address,
                     MemoryAccount {
                         nonce,
-                        balance,
+                        balance: *balance,
                         storage,
                         code,
                     },
@@ -1319,6 +1317,7 @@ mod test {
     use {
         super::*,
         crate::instructions::AllocAccount,
+        evm::lamports_to_wei,
         evm_state::{
             transactions::{TransactionAction, TransactionSignature},
             AccountProvider, AccountState, ExitReason, ExitSucceed, FromKey, BURN_GAS_PRICE,
@@ -1452,12 +1451,12 @@ mod test {
             }
         }
 
-        fn deposit_evm(&mut self, recipient: evm_state::Address, gweis: evm_state::U256) {
+        fn deposit_evm(&mut self, recipient: evm_state::Address, wei: evm_state::U256) {
             let mut account_state = self
                 .evm_state
                 .get_account_state(recipient)
                 .unwrap_or_default();
-            account_state.balance += gweis;
+            account_state.balance += wei;
             self.evm_state.set_account_state(recipient, account_state)
         }
 
@@ -2016,13 +2015,10 @@ mod test {
         let secret_key = evm::SecretKey::from_slice(&SECRET_KEY_DUMMY).unwrap();
 
         let address = secret_key.to_address();
-        evm_context.deposit_evm(
-            address,
-            U256::from(crate::evm::GWEI_PER_LAMPORT) * 300000u32,
-        );
+        evm_context.deposit_evm(address, lamports_to_wei(300000));
         let tx_create = evm::UnsignedTransaction {
             nonce: 0u32.into(),
-            gas_price: crate::evm::GWEI_PER_LAMPORT.into(),
+            gas_price: crate::evm::WEI_PER_LAMPORT.into(),
             gas_limit: 300000u32.into(),
             action: TransactionAction::Create,
             value: 0u32.into(),
@@ -2289,7 +2285,7 @@ mod test {
                 .get_account_state(ether_dummy_address)
                 .unwrap()
                 .balance,
-            crate::scope::evm::lamports_to_gwei(1000)
+            lamports_to_wei(1000)
         )
     }
 
@@ -2342,7 +2338,7 @@ mod test {
                 .get_account_state(ether_dummy_address)
                 .unwrap()
                 .balance,
-            crate::scope::evm::lamports_to_gwei(1000)
+            lamports_to_wei(1000)
         );
 
         // Transfer back
@@ -2356,7 +2352,7 @@ mod test {
             gas_price: 1u32.into(),
             gas_limit: 300000u32.into(),
             action: TransactionAction::Call(*precompiles::ETH_TO_VLX_ADDR),
-            value: crate::scope::evm::lamports_to_gwei(lamports_to_send_back),
+            value: lamports_to_wei(lamports_to_send_back),
             input: precompiles::ETH_TO_VLX_CODE
                 .abi
                 .encode_input(&[ethabi::Token::FixedBytes(
@@ -2403,7 +2399,7 @@ mod test {
                 .get_account_state(ether_dummy_address)
                 .unwrap()
                 .balance,
-            crate::scope::evm::lamports_to_gwei(lamports_to_send)
+            lamports_to_wei(lamports_to_send)
         );
     }
 
@@ -2420,11 +2416,14 @@ mod test {
         let bob = evm::SecretKey::new(&mut rand); // SECRET_KEY_DUMMY
         let bob_addr = bob.to_address();
         subchain_owner_acc.set_lamports(SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX + 777);
-        evm_context.deposit_evm(bob_addr, lamports_to_gwei(10_000_000));
+        evm_context.deposit_evm(bob_addr, lamports_to_wei(10_000_000));
 
         // create subchain
         let subchain_id = 0x5677;
-        let alloc = BTreeMap::from_iter([(bob_addr, AllocAccount::new_with_balance(20_000_000))]);
+        let alloc = BTreeMap::from_iter([(
+            bob_addr,
+            AllocAccount::new_with_balance(lamports_to_wei(20_000_000)),
+        )]);
         let subchain_config = SubchainConfig {
             hardfork: crate::instructions::Hardfork::Istanbul,
             alloc,
@@ -2452,8 +2451,8 @@ mod test {
             .unwrap();
 
         let bobs_mainchain_acc = evm_context.evm_state.get_account_state(bob_addr).unwrap();
-        assert_eq!(bobs_subchain_acc.balance, lamports_to_gwei(20_000_000));
-        assert_eq!(bobs_mainchain_acc.balance, lamports_to_gwei(10_000_000));
+        assert_eq!(bobs_subchain_acc.balance, lamports_to_wei(20_000_000));
+        assert_eq!(bobs_mainchain_acc.balance, lamports_to_wei(10_000_000));
 
         // try to swap from EVM mainchain and assert successful swap
         let swap_within_mainchain = evm::UnsignedTransaction {
@@ -2461,7 +2460,7 @@ mod test {
             gas_price: BURN_GAS_PRICE.into(),
             gas_limit: 300_000u32.into(),
             action: TransactionAction::Call(*precompiles::ETH_TO_VLX_ADDR),
-            value: crate::scope::evm::lamports_to_gwei(4_000_000),
+            value: lamports_to_wei(4_000_000),
             input: precompiles::ETH_TO_VLX_CODE
                 .abi
                 .encode_input(&[ethabi::Token::FixedBytes(alice.to_bytes().to_vec())])
@@ -2491,7 +2490,7 @@ mod test {
             gas_price: BURN_GAS_PRICE.into(),
             gas_limit: 300000u32.into(),
             action: TransactionAction::Call(*precompiles::ETH_TO_VLX_ADDR),
-            value: crate::scope::evm::lamports_to_gwei(3_000_000),
+            value: lamports_to_wei(3_000_000),
             input: precompiles::ETH_TO_VLX_CODE
                 .abi
                 .encode_input(&[ethabi::Token::FixedBytes(alice.to_bytes().to_vec())])
@@ -2527,10 +2526,10 @@ mod test {
             .get_account_state(*precompiles::ETH_TO_VLX_ADDR)
             .unwrap();
 
-        assert_eq!(native_pseudoswap_acc.balance, lamports_to_gwei(3_000_000));
+        assert_eq!(native_pseudoswap_acc.balance, lamports_to_wei(3_000_000));
 
         let fee_lamports = 42408;
-        assert_eq!(bob_acc.balance, lamports_to_gwei(17_000_000 - fee_lamports));
+        assert_eq!(bob_acc.balance, lamports_to_wei(17_000_000 - fee_lamports));
     }
 
     #[test]
@@ -2583,7 +2582,7 @@ mod test {
                 .get_account_state(ether_dummy_address)
                 .unwrap()
                 .balance,
-            crate::scope::evm::lamports_to_gwei(1000)
+            lamports_to_wei(1000)
         );
 
         // Transfer back
@@ -2597,7 +2596,7 @@ mod test {
             gas_price: 1u32.into(),
             gas_limit: 300000u32.into(),
             action: TransactionAction::Call(*precompiles::ETH_TO_VLX_ADDR),
-            value: crate::scope::evm::lamports_to_gwei(lamports_to_send_back),
+            value: lamports_to_wei(lamports_to_send_back),
             input: precompiles::ETH_TO_VLX_CODE
                 .abi
                 .encode_input(&[ethabi::Token::FixedBytes(
@@ -2648,14 +2647,13 @@ mod test {
                 .get_account_state(ether_dummy_address)
                 .unwrap()
                 .balance
-                < crate::scope::evm::lamports_to_gwei(lamports_to_send - lamports_to_send_back)
+                < lamports_to_wei(lamports_to_send - lamports_to_send_back)
                 && evm_context
                     .evm_state
                     .get_account_state(ether_dummy_address)
                     .unwrap()
                     .balance
-                    > crate::scope::evm::lamports_to_gwei(lamports_to_send - lamports_to_send_back)
-                        - 300000u32 //(max_fee)
+                    > lamports_to_wei(lamports_to_send - lamports_to_send_back) - 300000u32 //(max_fee)
         );
     }
 
@@ -2708,7 +2706,7 @@ mod test {
                 .get_account_state(ether_dummy_address)
                 .unwrap()
                 .balance,
-            crate::scope::evm::lamports_to_gwei(1000)
+            lamports_to_wei(1000)
         );
 
         // Transfer back
@@ -2722,7 +2720,7 @@ mod test {
             gas_price: 1u32.into(),
             gas_limit: 300000u32.into(),
             action: TransactionAction::Call(*precompiles::ETH_TO_VLX_ADDR),
-            value: crate::scope::evm::lamports_to_gwei(lamports_to_send_back),
+            value: lamports_to_wei(lamports_to_send_back),
             input: precompiles::ETH_TO_VLX_CODE
                 .abi
                 .encode_input(&[ethabi::Token::FixedBytes(
@@ -2770,7 +2768,7 @@ mod test {
                 .get_account_state(ether_dummy_address)
                 .unwrap()
                 .balance,
-            crate::scope::evm::lamports_to_gwei(lamports_to_send)
+            lamports_to_wei(lamports_to_send)
         );
     }
 
@@ -3184,7 +3182,7 @@ mod test {
             .with_utc_timestamps()
             .init();
         let mut evm_context = EvmMockContext::new(
-            gweis_to_lamports(U256::from(300000u64 * evm_state::BURN_GAS_PRICE * 2)).0,
+            wei_to_lamports(U256::from(300000u64 * evm_state::BURN_GAS_PRICE * 2)).0,
         );
 
         let mut rand = evm_state::rand::thread_rng();
@@ -3246,7 +3244,7 @@ mod test {
         assert_eq!(burn_fee * 2, evm_balance_difference);
         assert_eq!(
             evm_context.native_account(user_id).lamports(),
-            user_balance_before + gweis_to_lamports(evm_balance_difference).0 / 2
+            user_balance_before + wei_to_lamports(evm_balance_difference).0 / 2
         );
     }
 
@@ -3354,7 +3352,7 @@ mod test {
         let executor = &evm_context.evm_state;
         let tx = executor.find_transaction_receipt(tx_hash).unwrap();
         let burn_fee =
-            gweis_to_lamports(U256::from(tx.used_gas) * U256::from(evm_state::BURN_GAS_PRICE));
+            wei_to_lamports(U256::from(tx.used_gas) * U256::from(evm_state::BURN_GAS_PRICE));
 
         // EVM balance is still zero
         assert_eq!(
@@ -3678,9 +3676,10 @@ mod test {
 
         let mut config = SubchainConfig::default();
         let evm_address = crate::evm_address_for_program(user_id);
-        config
-            .alloc
-            .insert(evm_address, AllocAccount::new_with_balance(10000));
+        config.alloc.insert(
+            evm_address,
+            AllocAccount::new_with_balance(lamports_to_wei(10000)),
+        );
 
         setup_chain(&mut evm_context, user_id, chain_id, config, 0);
 
@@ -3716,9 +3715,10 @@ mod test {
 
         let to = crate::evm_address_for_program(user_id);
         let mut config = SubchainConfig::default();
-        config
-            .alloc
-            .insert(address, AllocAccount::new_with_balance(10000));
+        config.alloc.insert(
+            address,
+            AllocAccount::new_with_balance(lamports_to_wei(10000)),
+        );
 
         let chain_id = 0x561;
         setup_chain(&mut evm_context, user_id, chain_id, config, 42000);
@@ -3748,9 +3748,10 @@ mod test {
 
         let to = crate::evm_address_for_program(user_id);
         let mut config = SubchainConfig::default();
-        config
-            .alloc
-            .insert(address, AllocAccount::new_with_balance(10000));
+        config.alloc.insert(
+            address,
+            AllocAccount::new_with_balance(lamports_to_wei(10000)),
+        );
 
         let chain_id = 0x561;
         setup_chain(&mut evm_context, user_id, chain_id, config, 1);
@@ -3795,7 +3796,7 @@ mod test {
         );
         for (evm_address, account) in config.alloc {
             let evm_acc_on_sub = subchain_evm.get_account_state(evm_address).unwrap();
-            assert_eq!(evm_acc_on_sub.balance, lamports_to_gwei(account.balance));
+            assert_eq!(evm_acc_on_sub.balance, account.balance);
         }
     }
 
@@ -3875,7 +3876,7 @@ mod test {
         assert_eq!(state_before, state_after);
 
         let burn_fee = transfer_gas_used * evm::BURN_GAS_PRICE;
-        let burn_fee = gweis_to_lamports(burn_fee.into()).0;
+        let burn_fee = wei_to_lamports(burn_fee.into()).0;
         assert_eq!(
             subchain_state_account_before.lamports() - subchain_state_account.lamports(),
             burn_fee
@@ -3898,9 +3899,10 @@ mod test {
 
         let to = crate::evm_address_for_program(user_id);
         let mut config = SubchainConfig::default();
-        config
-            .alloc
-            .insert(address, AllocAccount::new_with_balance(10000));
+        config.alloc.insert(
+            address,
+            AllocAccount::new_with_balance(lamports_to_wei(10000)),
+        );
 
         let chain_id = 0x561;
         setup_chain(&mut evm_context, user_id, chain_id, config, 42000 * 3);

@@ -215,11 +215,11 @@ pub struct AllocAccount {
 }
 
 impl AllocAccount {
-    pub fn new_with_balance<U: Into<U256>>(gwei: U) -> Self {
+    pub fn new_with_balance(wei: U256) -> Self {
         Self {
             code: vec![],
             storage: BTreeMap::new(),
-            balance: gwei.into(),
+            balance: wei,
             nonce: None,
         }
     }

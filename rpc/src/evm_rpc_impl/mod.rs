@@ -296,7 +296,7 @@ impl GeneralERPC for GeneralErpcImpl {
     }
 
     fn gas_price(&self, _meta: Self::Metadata) -> Result<Gas, Error> {
-        Ok(solana_evm_loader_program::scope::evm::lamports_to_gwei(
+        Ok(solana_evm_loader_program::scope::evm::lamports_to_wei(
             GAS_PRICE,
         ))
     }

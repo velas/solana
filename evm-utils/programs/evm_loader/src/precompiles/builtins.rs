@@ -1,20 +1,18 @@
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use snafu::{ensure, ResultExt};
-use std::{marker::PhantomData, str::FromStr};
-
-use ethabi::{Function, Param, ParamType, StateMutability, Token};
-use evm_state::{executor::PrecompileOutput, CallScheme, ExitSucceed};
-use once_cell::sync::Lazy;
-use primitive_types::H160;
-
-use super::abi_parse::ParseTokens;
-use super::{errors::*, CallResult};
-use super::{NativeContext, Result};
-use crate::account_structure::AccountStructure;
-use crate::scope::evm::gweis_to_lamports;
-use solana_sdk::account::{ReadableAccount, WritableAccount};
-use solana_sdk::pubkey::Pubkey;
+use {
+    super::{abi_parse::ParseTokens, errors::*, CallResult, NativeContext, Result},
+    crate::{account_structure::AccountStructure, scope::evm::wei_to_lamports},
+    ethabi::{Function, Param, ParamType, StateMutability, Token},
+    evm_state::{executor::PrecompileOutput, CallScheme, ExitSucceed},
+    once_cell::sync::Lazy,
+    primitive_types::H160,
+    serde::{de::DeserializeOwned, Deserialize, Serialize},
+    snafu::{ensure, ResultExt},
+    solana_sdk::{
+        account::{ReadableAccount, WritableAccount},
+        pubkey::Pubkey,
+    },
+    std::{marker::PhantomData, str::FromStr},
+};
 
 pub trait NativeFunction<Inputs> {
     type PromiseType;
@@ -228,8 +226,7 @@ pub static ETH_TO_VLX_CODE: Lazy<NativeContract<EthToVlxImpl, Pubkey>> = Lazy::n
         }
 
         // TODO: return change back
-        let (lamports, _change) =
-            gweis_to_lamports(cx.precompile_context.evm_context.apparent_value);
+        let lamports = wei_to_lamports(cx.precompile_context.evm_context.apparent_value).0;
         // TODO: remove native context in handle after majority update
         if cx.keep_old_errors {
             let user = if let Some(account) = cx.accounts.find_user(&pubkey) {

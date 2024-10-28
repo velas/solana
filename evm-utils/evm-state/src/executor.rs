@@ -646,8 +646,8 @@ impl Executor {
     //  /// 5. value: amount (specified by method caller)
     //  ///
     //  /// Note: This operation is failable, and can return error in case, when user has no enough tokens on his account.
-    // pub fn burn(&mut self, from: H160, amount: U256) -> ExecutionResult {
-    //     match self.with_executor(|e| e.state_mut().withdraw(evm_address, gweis)) {
+    // pub fn burn(&mut self, from: H160, wei: U256) -> ExecutionResult {
+    //     match self.with_executor(|e| e.state_mut().withdraw(evm_address, wei)) {
     //         Ok(_) => {},
     //         Err(e) => return ExecutionResult {
     //             exit_reason: ExitReason::Error(e), // Error - should be rollbacked.

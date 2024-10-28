@@ -9,7 +9,7 @@ use {
     },
     solana_cli_output::{return_signers_with_config, ReturnSignersConfig},
     solana_client::{blockhash_query::BlockhashQuery, rpc_client::RpcClient},
-    solana_evm_loader_program::{instructions::FeePayerType, scope::evm::gweis_to_lamports},
+    solana_evm_loader_program::{instructions::FeePayerType, scope::evm::wei_to_lamports},
     solana_sdk::{
         commitment_config::CommitmentConfig,
         message::Message,
@@ -266,7 +266,7 @@ impl EvmCliCommand {
 
 fn get_evm_balance(rpc_client: &RpcClient, address: evm::H160) -> anyhow::Result<()> {
     let balance = rpc_client.get_evm_balance(&address)?;
-    let (lamports, _dust) = gweis_to_lamports(balance);
+    let (lamports, _dust) = wei_to_lamports(balance);
     let vlx = lamports_to_sol(lamports);
 
     println!(

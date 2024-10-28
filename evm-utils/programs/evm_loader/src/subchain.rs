@@ -82,6 +82,7 @@ mod test {
     use {
         super::SubchainState,
         crate::{
+            evm::lamports_to_wei,
             instructions::{AllocAccount, Hardfork, SubchainConfig},
             solana,
         },
@@ -95,7 +96,10 @@ mod test {
             hardfork: Hardfork::Istanbul,
             network_name: "test".to_string(),
             token_name: "test".to_string(),
-            alloc: BTreeMap::from_iter([(H160::zero(), AllocAccount::new_with_balance(12))]),
+            alloc: BTreeMap::from_iter([(
+                H160::zero(),
+                AllocAccount::new_with_balance(lamports_to_wei(12)),
+            )]),
         };
         let mut state = SubchainState::new(config, solana::Address::default());
         state.update(|h| h.push(H256::repeat_byte(0x11), 12));
