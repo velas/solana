@@ -1156,28 +1156,7 @@ impl EvmProcessor {
         let alloc: Vec<(H160, MemoryAccount)> = config
             .alloc
             .iter()
-            .map(|(evm_address, account)| {
-                let AllocAccount {
-                    code,
-                    storage,
-                    balance,
-                    nonce,
-                } = account;
-
-                let nonce = nonce.unwrap_or(0).into();
-                let code = code.clone();
-                let storage = storage.clone();
-
-                (
-                    *evm_address,
-                    MemoryAccount {
-                        nonce,
-                        balance: *balance,
-                        storage,
-                        code,
-                    },
-                )
-            })
+            .map(|(evm_address, account)| (*evm_address, MemoryAccount::from(account.clone())))
             .collect();
 
         // write config into subchain state, and save owner.
