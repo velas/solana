@@ -82,7 +82,7 @@ impl Default for BlockVersion {
 pub struct AccountState {
     /// Account nonce.
     pub nonce: U256,
-    /// Account balance, in gwei.
+    /// Account balance, in wei.
     pub balance: U256,
     /// Account code.
     pub code: Code,

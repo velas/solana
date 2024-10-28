@@ -1,8 +1,6 @@
 //! A command-line executable for generating the chain's genesis config.
 #![allow(clippy::integer_arithmetic)]
 
-use solana_ledger::blockstore::EvmStateJson;
-
 use {
     clap::{crate_description, crate_name, value_t, value_t_or_exit, App, Arg, ArgMatches},
     evm_state::U256,
@@ -17,7 +15,10 @@ use {
     },
     solana_entry::poh::compute_hashes_per_tick,
     solana_genesis::Base64Account,
-    solana_ledger::{blockstore::create_new_ledger, blockstore_db::LedgerColumnOptions},
+    solana_ledger::{
+        blockstore::{create_new_ledger, EvmStateJson},
+        blockstore_db::LedgerColumnOptions,
+    },
     solana_runtime::hardened_unpack::MAX_GENESIS_ARCHIVE_UNPACKED_SIZE,
     solana_sdk::{
         account::{Account, AccountSharedData, ReadableAccount, WritableAccount},
@@ -692,7 +693,7 @@ fn main() -> Result<(), Box<dyn error::Error>> {
     }
 
     let (mut evm_state_lamports, change) =
-        solana_evm_loader_program::scope::evm::gweis_to_lamports(evm_state_balance);
+        solana_evm_loader_program::scope::evm::wei_to_lamports(evm_state_balance);
     if change != U256::zero() {
         evm_state_lamports += 1;
     }

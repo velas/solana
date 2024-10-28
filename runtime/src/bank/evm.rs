@@ -272,7 +272,7 @@ mod evmtests {
         log::*,
         solana_evm_loader_program::{
             instructions::AllocAccount, precompiles::ETH_TO_VLX_ADDR,
-            processor::SUBCHAIN_CREATION_DEPOSIT_VLX, scope::evm::lamports_to_gwei,
+            processor::SUBCHAIN_CREATION_DEPOSIT_VLX, scope::evm::lamports_to_wei,
         },
         solana_program_runtime::{evm_executor_context::StateExt, timings::ExecuteTimings},
         solana_sdk::{
@@ -786,7 +786,7 @@ mod evmtests {
         let state = evm_state.get_account_state(receiver).unwrap_or_default();
         assert_eq!(
             state.balance,
-            solana_evm_loader_program::scope::evm::lamports_to_gwei(20000)
+            solana_evm_loader_program::scope::evm::lamports_to_wei(20000)
         ); // 10^9 times bigger
         let state_swapper = evm_state
             .get_account_state(*solana_evm_loader_program::precompiles::ETH_TO_VLX_ADDR)
@@ -962,9 +962,10 @@ mod evmtests {
     ) -> Transaction {
         let mut config: solana_evm_loader_program::instructions::SubchainConfig =
             Default::default();
-        config
-            .alloc
-            .insert(receiver, AllocAccount::new_with_balance(lamports));
+        config.alloc.insert(
+            receiver,
+            AllocAccount::new_with_balance(lamports_to_wei(lamports)),
+        );
         let from_pubkey = from_keypair.pubkey();
         let instruction =
             solana_evm_loader_program::create_evm_subchain_account(from_pubkey, chain_id, config);
@@ -1069,7 +1070,7 @@ mod evmtests {
             EvmState::Committed(_) => panic!(),
         };
 
-        assert_eq!(state.balance, lamports_to_gwei(20000));
+        assert_eq!(state.balance, lamports_to_wei(20000));
         bank.freeze();
 
         let evm_state = bank.evm.main_chain().state();
@@ -1086,7 +1087,7 @@ mod evmtests {
         let state = subchain_evm_state
             .get_account_state(receiver)
             .unwrap_or_default();
-        assert_eq!(state.balance, lamports_to_gwei(20000));
+        assert_eq!(state.balance, lamports_to_wei(20000));
 
         let hash_after = bank.evm.chain_state(TEST_CHAIN_ID + 1).state().last_root();
         // hash updated with nonce increasing
@@ -1107,7 +1108,7 @@ mod evmtests {
             solana_sdk::instruction::AccountMeta,
         };
 
-        fn get_gwei_balance(bank: &Bank, subchain_id: u64, addr: H160) -> U256 {
+        fn get_wei_balance(bank: &Bank, subchain_id: u64, addr: H160) -> U256 {
             bank.evm()
                 .side_chains()
                 .get(&subchain_id)
@@ -1135,7 +1136,7 @@ mod evmtests {
 
         assert_eq!(bank.get_balance(&subchain_owner.pubkey()), mint_lamports);
         assert_eq!(bank.get_balance(&alice), 0);
-        assert_eq!(get_gwei_balance(&bank, subchain_id, bob_addr), 0.into());
+        assert_eq!(get_wei_balance(&bank, subchain_id, bob_addr), 0.into());
 
         let recent_hash = genesis_config.hash();
 
@@ -1156,11 +1157,11 @@ mod evmtests {
             mint_lamports - subchain_creation_fee
         );
         assert_eq!(
-            get_gwei_balance(&bank, subchain_id, bob_addr),
-            lamports_to_gwei(20_000_000)
+            get_wei_balance(&bank, subchain_id, bob_addr),
+            lamports_to_wei(20_000_000)
         );
         assert_eq!(
-            get_gwei_balance(&bank, subchain_id, *ETH_TO_VLX_ADDR),
+            get_wei_balance(&bank, subchain_id, *ETH_TO_VLX_ADDR),
             0.into()
         );
 
@@ -1175,7 +1176,7 @@ mod evmtests {
                 gas_price: evm_state::BURN_GAS_PRICE.into(),
                 gas_limit: 300000u32.into(),
                 action: evm_state::TransactionAction::Call(*precompiles::ETH_TO_VLX_ADDR),
-                value: lamports_to_gwei(3_000_000),
+                value: lamports_to_wei(3_000_000),
                 input,
             }
             .sign(&bob, Some(subchain_id));
@@ -1204,12 +1205,12 @@ mod evmtests {
 
         assert_eq!(bank.get_balance(&alice), 0);
         assert_eq!(
-            get_gwei_balance(&bank, subchain_id, bob_addr),
-            lamports_to_gwei(17_000_000)
+            get_wei_balance(&bank, subchain_id, bob_addr),
+            lamports_to_wei(17_000_000)
         );
         assert_eq!(
-            get_gwei_balance(&bank, subchain_id, *ETH_TO_VLX_ADDR),
-            lamports_to_gwei(3_000_000)
+            get_wei_balance(&bank, subchain_id, *ETH_TO_VLX_ADDR),
+            lamports_to_wei(3_000_000)
         );
     }
 }

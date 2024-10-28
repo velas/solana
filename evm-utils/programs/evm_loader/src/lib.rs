@@ -17,20 +17,20 @@ pub mod scope {
             primitive_types::H160 as Address,
         };
 
-        pub const GWEI_PER_LAMPORT: u64 = 1_000_000_000; // Lamports is 1/10^9 of SOLs while GWEI is 1/10^18
+        pub const WEI_PER_LAMPORT: u64 = 1_000_000_000; // Lamports is 1/10^9 of SOL, while WEI is 1/10^18 of ETH
 
         pub type Lamports = u64;
-        pub type Gwei = U256;
+        pub type Wei = U256;
 
-        /// Convert lamports to gwei
-        pub fn lamports_to_gwei<LAMPORTS: Into<U256>>(lamports: LAMPORTS) -> Gwei {
-            lamports.into() * U256::from(GWEI_PER_LAMPORT)
+        /// Convert lamports to wei
+        pub fn lamports_to_wei(lamports: u64) -> Wei {
+            U256::from(lamports) * U256::from(WEI_PER_LAMPORT)
         }
 
-        /// Converts gweis back to lamports, returns remainder as second element.
-        pub fn gweis_to_lamports(gweis: Gwei) -> (Lamports, Gwei) {
-            let lamports = gweis / U256::from(GWEI_PER_LAMPORT);
-            let remainder = gweis % U256::from(GWEI_PER_LAMPORT);
+        /// Converts wei to lamports, returns remainder as second element.
+        pub fn wei_to_lamports(wei: Wei) -> (Lamports, Wei) {
+            let lamports = wei / U256::from(WEI_PER_LAMPORT);
+            let remainder = wei % U256::from(WEI_PER_LAMPORT);
             (lamports.as_u64(), remainder)
         }
     }

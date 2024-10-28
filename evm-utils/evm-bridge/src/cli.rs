@@ -3,7 +3,7 @@ use {
     log::{info, warn},
     primitive_types::U256,
     solana_cli_config::Config,
-    solana_evm_loader_program::scope::evm::GWEI_PER_LAMPORT,
+    solana_evm_loader_program::scope::evm::WEI_PER_LAMPORT,
     solana_sdk::fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
     std::{net::SocketAddr, time::Duration},
 };
@@ -27,7 +27,7 @@ pub struct BridgeCli {
     pub evm_chain_id: u64,
 
     /// Reject too cheap transactions
-    #[arg(long, default_value_t = default_min_gas_price(), value_parser = parse_min_gas_price, value_name = "GWEI")]
+    #[arg(long, default_value_t = default_min_gas_price(), value_parser = parse_min_gas_price, value_name = "WEI")]
     pub min_gas_price: U256,
 
     /// Print full details in RPC error message, and ignore original message
@@ -70,7 +70,7 @@ fn default_native_keypair() -> String {
 fn default_min_gas_price() -> U256 {
     //TODO: Add gas logic
     // 21000 is smallest call in evm
-    ceil_to_gwei((21000 * GWEI_PER_LAMPORT / DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE).into())
+    ceil_to_gwei((21000 * WEI_PER_LAMPORT / DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE).into())
 }
 
 fn parse_min_gas_price(arg: &str) -> Result<U256, String> {
