@@ -1,16 +1,22 @@
 use {
+    crate::genesis_json,
     solana_client::{
         client_error::ClientErrorKind,
         rpc_request::{RpcError, RpcResponseErrorData},
     },
+    solana_evm_loader_program::instructions::AllocAccount,
     solana_sdk::signer::Signer,
-    std::io::{Read, Write},
+    std::{
+        collections::BTreeMap,
+        io::{Read, Write},
+        path::Path,
+    },
 };
 
-impl super::Config {
-    pub fn save(&self) -> Result<(), color_eyre::eyre::Error> {
-        let mut file = std::fs::File::create(&self.config_path)?;
-        let data = toml::to_string(&self)?;
+impl genesis_json::GenesisConfig {
+    pub fn save(&self, config_path: impl AsRef<Path>) -> Result<(), color_eyre::eyre::Error> {
+        let mut file = std::fs::File::create(config_path)?;
+        let data = serde_json::to_string_pretty(&self)?;
         file.write_all(data.as_bytes())?;
         Ok(())
     }
@@ -19,8 +25,7 @@ impl super::Config {
         let mut buf_reader = std::io::BufReader::new(file);
         let mut contents = String::new();
         buf_reader.read_to_string(&mut contents)?;
-        let mut config: Self = toml::from_str(&contents)?;
-        config.config_path = path.to_string();
+        let config: Self = serde_json::from_str(&contents)?;
         Ok(config)
     }
 
@@ -28,23 +33,31 @@ impl super::Config {
         &self,
         keypair: solana_sdk::signer::keypair::Keypair,
         client: &solana_client::rpc_client::RpcClient,
+        dry_run: bool,
     ) -> Result<(), color_eyre::eyre::Error> {
-        let chain_id = self.chain_id.0;
-        // TODO: replace Vec<(_, u64)> with BTreeMap<H160, solana_evm_loader_program::instructions::AllocAccount>
-        let alloc: Vec<(_, u64)> = self
-            .minting_addresses
-            .address
+        let chain_id: u64 = self.config.chain_id.into();
+        let alloc: BTreeMap<_, AllocAccount> = self
+            .alloc
+            .0
             .iter()
-            .cloned()
-            .zip(self.minting_addresses.balance.iter().copied())
+            .map(|(addr, v)| {
+                (*addr, {
+                    AllocAccount {
+                        balance: v.balance,
+                        code: v.code.0.clone(),
+                        storage: v.storage.clone(),
+                        nonce: v.nonce,
+                    }
+                })
+            })
             .collect();
 
         // let mint = todo!("{:?}", mint);
 
         let config = solana_evm_loader_program::instructions::SubchainConfig {
-            token_name: self.token_name.clone(),
-            network_name: self.network_name.clone(),
-            hardfork: match self.hardfork {
+            token_name: self.config.token_name.clone(),
+            network_name: self.config.network_name.clone(),
+            hardfork: match self.config.start_hardfork {
                 crate::Hardfork::Istanbul => {
                     solana_evm_loader_program::instructions::Hardfork::Istanbul
                 }
@@ -60,15 +73,17 @@ impl super::Config {
             client.get_latest_blockhash()?,
         );
         // dry run:
-        // let simulation = client.simulate_transaction(&transaction)?;
-        // simulation.value.err
-        // client.send_transaction_with_config(
-        //     &transaction,
-        //     RpcSendTransactionConfig {
-        //         skip_preflight: true,
-        //         ..Default::default()
-        //     },
-        // )?;
+        let simulation = client.simulate_transaction(&transaction)?;
+        if let Some(err) = simulation.value.err {
+            return Err(color_eyre::eyre::Error::msg(format!(
+                "Simulation error: {:?}",
+                err
+            )));
+        }
+
+        if dry_run {
+            return Ok(());
+        }
         client
             .send_and_confirm_transaction(&transaction)
             .map_err(|e| {

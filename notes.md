@@ -122,7 +122,7 @@ Todo: disable incremental for now
 Finalized block for rpc call.
 
 TODO for this week:
-1. Store block in blockstore
+1. Store block in blockstore (limit 100 blocks) 
 2. (optional) store block in evm archive/bigtable
 3. last-roots for subchain collecting
 4. + blockhashes for subchain changing 
@@ -130,10 +130,15 @@ TODO for this week:
 6. * SubchainConfig::validate() - check if chain_id in blacklist, not main_chain_id, is prefixed with 0x56, strings are limited by length.
 7. + Mixed fee payer model - 
 8. manager - fix inputs for chain_id and mint
+9. subchain gas in VLX  = 40
+10. Min gas_price in subchain config
+11. geth --follow
+12. geth init
 
-tests:
+tests:532
 Todo: Add test for register slot with subchains
 
-1. Min gas_price in config == FOR ALEX
-2. addr bridge in config == FOR ALEX
-3. Reverted transaction processing == FOR ALEX
+1. addr bridge in config == FOR ALEX
+2. Reverted transaction processing == FOR ALEX
+
+

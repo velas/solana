@@ -211,7 +211,7 @@ pub struct AllocAccount {
     pub code: Vec<u8>,
     pub storage: BTreeMap<H256, H256>,
     pub balance: U256,
-    pub nonce: Option<u64>,
+    pub nonce: u64,
 }
 
 impl AllocAccount {
@@ -220,7 +220,7 @@ impl AllocAccount {
             code: vec![],
             storage: BTreeMap::new(),
             balance: wei,
-            nonce: None,
+            nonce: 0,
         }
     }
 }
@@ -228,7 +228,7 @@ impl AllocAccount {
 impl From<AllocAccount> for MemoryAccount {
     fn from(value: AllocAccount) -> Self {
         MemoryAccount {
-            nonce: value.nonce.unwrap_or(0).into(),
+            nonce: value.nonce.into(),
             balance: value.balance,
             storage: value.storage,
             code: value.code,

@@ -891,28 +891,28 @@ pub fn main() {
                        download from other validators"),
         )
         
-        // .arg(
-        //     Arg::with_name("incremental_snapshots")
-        //         .long("incremental-snapshots")
-        //         .takes_value(false)
-        //         .hidden(true)
-        //         .conflicts_with("no_incremental_snapshots")
-        //         .help("Enable incremental snapshots")
-        //         .long_help("Enable incremental snapshots by setting this flag. \
-        //            When enabled, --snapshot-interval-slots will set the \
-        //            incremental snapshot interval. To set the full snapshot \
-        //            interval, use --full-snapshot-interval-slots.")
-        //  )
-        // .arg(
-        //     Arg::with_name("no_incremental_snapshots")
-        //         .long("no-incremental-snapshots")
-        //         .takes_value(false)
-        //         .help("Disable incremental snapshots")
-        //         .long_help("Disable incremental snapshots by setting this flag. \
-        //            When enabled, --snapshot-interval-slots will set the \
-        //            incremental snapshot interval. To set the full snapshot \
-        //            interval, use --full-snapshot-interval-slots.")
-        //  )
+        .arg(
+            Arg::with_name("incremental_snapshots")
+                .long("incremental-snapshots")
+                .takes_value(false)
+                .hidden(true)
+                .conflicts_with("no_incremental_snapshots")
+                .help("Enable incremental snapshots")
+                .long_help("Enable incremental snapshots by setting this flag. \
+                   When enabled, --snapshot-interval-slots will set the \
+                   incremental snapshot interval. To set the full snapshot \
+                   interval, use --full-snapshot-interval-slots.")
+         )
+        .arg(
+            Arg::with_name("no_incremental_snapshots")
+                .long("no-incremental-snapshots")
+                .takes_value(false)
+                .help("Disable incremental snapshots")
+                .long_help("Disable incremental snapshots by setting this flag. \
+                   When enabled, --snapshot-interval-slots will set the \
+                   incremental snapshot interval. To set the full snapshot \
+                   interval, use --full-snapshot-interval-slots.")
+         )
         .arg(
             Arg::with_name("incremental_snapshot_interval_slots")
                 .long("incremental-snapshot-interval-slots")
