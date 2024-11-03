@@ -6,6 +6,7 @@ const MAX_BLOCKHASHES: usize = 256;
 use {
     borsh::{BorshDeserialize, BorshSchema, BorshSerialize},
     evm_state::H256 as Hash,
+    serde::{ser::SerializeStruct, Serialize},
     solana_sdk::clock::Slot,
 };
 
@@ -15,6 +16,23 @@ use {
 pub struct BlockhashQueue {
     blockhashes: [Hash; MAX_BLOCKHASHES],
     last_slot: Slot,
+}
+
+impl Serialize for BlockhashQueue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut ser_struct = serializer.serialize_struct("BlockhashQueue", 2)?;
+        let blockhashes = self
+            .blockhashes
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        ser_struct.serialize_field("blockhashes", &blockhashes)?;
+        ser_struct.serialize_field("last_slot", &self.last_slot)?;
+        ser_struct.end()
+    }
 }
 
 impl BlockhashQueue {

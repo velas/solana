@@ -11,11 +11,21 @@ use {
 };
 
 #[derive(
-    BorshSerialize, BorshDeserialize, BorshSchema, Clone, Debug, PartialEq, Eq, Ord, PartialOrd,
+    BorshSerialize,
+    BorshDeserialize,
+    BorshSchema,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    serde::Serialize,
 )]
 pub struct SubchainState {
     // Version is brosh enum-tag compatible - so we can later replace it with enum
     pub version: u8,
+    pub chain_id: u64,
     // Configuration:
     pub hardfork: Hardfork,
     pub network_name: String,
@@ -28,9 +38,10 @@ pub struct SubchainState {
 }
 
 impl SubchainState {
-    pub fn new(config: SubchainConfig, owner: solana::Address) -> Self {
+    pub fn new(config: SubchainConfig, owner: solana::Address, chain_id: u64) -> Self {
         Self {
             version: 0,
+            chain_id: chain_id,
             hardfork: config.hardfork,
             network_name: config.network_name,
             token_name: config.token_name,
@@ -101,7 +112,7 @@ mod test {
                 AllocAccount::new_with_balance(lamports_to_wei(12)),
             )]),
         };
-        let mut state = SubchainState::new(config, solana::Address::default());
+        let mut state = SubchainState::new(config, solana::Address::default(), 0);
         state.update(|h| h.push(H256::repeat_byte(0x11), 12));
         assert_eq!(
             state.last_hashes().get_hashes()[255],

@@ -8,9 +8,12 @@ use {
         parse_token::{parse_token, spl_token_2022_id, spl_token_id},
         parse_vote::parse_vote,
     },
+    borsh::BorshDeserialize,
     inflector::Inflector,
     serde_json::Value,
-    solana_sdk::{instruction::InstructionError, pubkey::Pubkey, stake, system_program, sysvar},
+    solana_sdk::{
+        evm_state, instruction::InstructionError, pubkey::Pubkey, stake, system_program, sysvar,
+    },
     std::{collections::HashMap, convert::TryFrom},
     thiserror::Error,
 };
@@ -23,6 +26,7 @@ lazy_static! {
     static ref SYSVAR_PROGRAM_ID: Pubkey = sysvar::id();
     static ref VOTE_PROGRAM_ID: Pubkey = solana_vote_program::id();
     static ref VELAS_ACCOUNT_PROGRAM_ID: Pubkey = velas_account_program::id();
+    static ref EVM_PROGRAM_ID: Pubkey = evm_state::id();
     static ref VELAS_RELYING_PARTY_PROGRAM_ID: Pubkey = velas_relying_party_program::id();
     pub static ref PARSABLE_PROGRAM_IDS: HashMap<Pubkey, ParsableAccount> = {
         let mut m = HashMap::new();
@@ -37,6 +41,7 @@ lazy_static! {
         m.insert(*STAKE_PROGRAM_ID, ParsableAccount::Stake);
         m.insert(*SYSVAR_PROGRAM_ID, ParsableAccount::Sysvar);
         m.insert(*VOTE_PROGRAM_ID, ParsableAccount::Vote);
+        m.insert(*EVM_PROGRAM_ID, ParsableAccount::EvmState);
         m.insert(*VELAS_ACCOUNT_PROGRAM_ID, ParsableAccount::VelasAccount);
         m.insert(
             *VELAS_RELYING_PARTY_PROGRAM_ID,
@@ -103,6 +108,7 @@ pub enum ParsableAccount {
     Stake,
     Sysvar,
     Vote,
+    EvmState,
     VelasAccount,
     VelasRelyingParty,
 }
@@ -134,6 +140,22 @@ pub fn parse_account_data(
         ParsableAccount::Stake => serde_json::to_value(parse_stake(data)?)?,
         ParsableAccount::Sysvar => serde_json::to_value(parse_sysvar(data, pubkey)?)?,
         ParsableAccount::Vote => serde_json::to_value(parse_vote(data)?)?,
+        ParsableAccount::EvmState => {
+            let val = solana_evm_loader_program::subchain::SubchainState::try_from_slice(data)
+                .map_err(|e| {
+                    println!("Parse error: {:?}", e);
+                    ParseAccountError::AccountNotParsable(ParsableAccount::EvmState)
+                })?;
+            let expected_addr = solana_evm_loader_program::evm_state_subchain_account(val.chain_id);
+            if pubkey != &expected_addr {
+                println!("Parse 111");
+                return Err(ParseAccountError::AccountNotParsable(
+                    ParsableAccount::EvmState,
+                ));
+            };
+
+            serde_json::to_value(val)?
+        }
         ParsableAccount::VelasAccount => {
             serde_json::to_value(velas_account_program::VelasAccountType::try_from(data)?)?
         }
@@ -152,6 +174,11 @@ pub fn parse_account_data(
 mod test {
     use {
         super::*,
+        crate::parse_account_data,
+        solana_evm_loader_program::{
+            instructions::{Hardfork, SubchainConfig},
+            subchain::SubchainState,
+        },
         solana_sdk::nonce::{
             state::{Data, Versions},
             State,
@@ -192,7 +219,49 @@ mod test {
             None,
         )
         .unwrap();
+
         assert_eq!(parsed.program, "nonce".to_string());
         assert_eq!(parsed.space, State::size() as u64);
+        let evm_state_subchain = SubchainState::new(
+            SubchainConfig {
+                token_name: "token_name".to_string(),
+                network_name: "network_name".to_string(),
+                hardfork: Hardfork::Istanbul,
+                alloc: Default::default(),
+            },
+            account_pubkey,
+            1,
+        );
+        let data = ::borsh::BorshSerialize::try_to_vec(&evm_state_subchain).unwrap();
+        let parsed = parse_account_data(
+            &solana_evm_loader_program::evm_state_subchain_account(1),
+            &evm_state::id(),
+            &data,
+            None,
+        )
+        .unwrap();
+        assert_eq!(parsed.program, "evm-state".to_string());
+        assert_eq!(
+            parsed
+                .parsed
+                .as_object()
+                .unwrap()
+                .get("chain_id")
+                .unwrap()
+                .as_u64()
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            parsed
+                .parsed
+                .as_object()
+                .unwrap()
+                .get("network_name")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            "network_name"
+        );
     }
 }
