@@ -23,7 +23,7 @@ use {
     serde::Serialize,
 )]
 pub struct SubchainState {
-    // Version is brosh enum-tag compatible - so we can later replace it with enum
+    // Version is borsh enum-tag compatible - so we can later replace it with enum
     pub version: u8,
     pub chain_id: u64,
     // Configuration:
