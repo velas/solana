@@ -11,7 +11,6 @@ use {
         scope::*,
         tx_chunks::TxChunks,
     },
-    crate::instructions::AllocAccount,
     borsh::BorshDeserialize,
     evm::{wei_to_lamports, Executor, ExitReason},
     evm_state::{ExecutionResult, MemoryAccount, H160, U256},
@@ -1160,7 +1159,7 @@ impl EvmProcessor {
             .collect();
 
         // write config into subchain state, and save owner.
-        let state = crate::subchain::SubchainState::new(config, whale_pubkey);
+        let state = crate::subchain::SubchainState::new(config, whale_pubkey, subchain_id);
 
         // Create subchain account
         let create_account_ix = system_instruction::create_account(

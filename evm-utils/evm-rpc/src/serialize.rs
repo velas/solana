@@ -10,12 +10,16 @@ use {
         str::FromStr,
     },
 };
-
 #[derive(Debug, Default, Hash, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deref)]
 pub struct Hex<T>(pub T);
 
-#[derive(Debug, Clone, Default)]
+#[derive(PartialEq, Eq, Debug, Clone, Default)]
 pub struct Bytes(pub Vec<u8>);
+impl Bytes {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
 fn format_hex_trimmed<T: LowerHex>(val: &T) -> String {
     let hex_str = format!("{:x}", val);

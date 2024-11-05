@@ -92,8 +92,7 @@ impl Bank {
 
         let old_root = self.evm().main_chain().state().last_root();
 
-        let last_blockhash = self.last_blockhash().to_bytes();
-        let hash = self
+          let hash = self
             .evm
             .main_chain()
             .state_write()
