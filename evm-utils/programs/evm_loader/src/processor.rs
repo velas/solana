@@ -1208,10 +1208,17 @@ impl EvmProcessor {
         let (rc, mut refmut);
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
         let sender_idx = if tx.is_big() { 3 } else { 2 };
-        // TODO: check sender is whitelisted
         let sender = &accounts.users[sender_idx];
-
         let mut state = crate::subchain::SubchainState::load(accounts)?;
+
+        if !state.whitelisted.is_empty() && !state.whitelisted.contains(sender.unsigned_key()) {
+            ic_msg!(
+                invoke_context,
+                "EVM Subchain Execution is forbidden for sender {:?}",
+                sender.unsigned_key()
+            );
+            return Err(EvmError::EVMSubchainExecutionForbidden);
+        }
         let last_hashes = Box::new(state.last_hashes().get_hashes().clone());
         let executor = get_executor!(rc, refmut => invoke_context, chain_id, last_hashes);
         // TODO(L): How to deal with reborrowing?? (we neeed last hashes from account to create executor, but to get it we need to borrow invoke context.)

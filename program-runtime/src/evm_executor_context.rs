@@ -544,6 +544,7 @@ impl EvmExecutorContext {
         }
     }
 
+    // TODO: move params by value?
     fn get_last_hashes(&self, params: &ChainParam) -> [evm_state::H256; MAX_EVM_BLOCKHASHES] {
         match params {
             ChainParam::CreateSubchain { chain_id: _ } => {

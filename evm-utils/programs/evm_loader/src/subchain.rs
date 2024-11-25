@@ -9,12 +9,13 @@ use {
     borsh::{BorshDeserialize, BorshSchema, BorshSerialize},
     evm_state::U256,
     solana_sdk::{account::ReadableAccount, borsh::get_instance_packed_len},
+    std::collections::BTreeSet,
 };
 
 #[derive(
     BorshSerialize,
     BorshDeserialize,
-    BorshSchema,
+    // BorshSchema,
     Clone,
     Debug,
     PartialEq,
@@ -37,7 +38,7 @@ pub struct SubchainState {
     // Mutable state:
     pub last_hashes: BlockhashQueue,
     pub gas_price: U256,
-    // pub whitelisted: BTreeSet<solana::Address>, // TODO: BTreeSet != BorshSchema
+    pub whitelisted: BTreeSet<solana::Address>, // TODO: BTreeSet != BorshSchema
 }
 
 impl SubchainState {
@@ -51,7 +52,7 @@ impl SubchainState {
             owner,
             last_hashes: BlockhashQueue::new(),
             gas_price: config.gas_price,
-            // whitelisted,
+            whitelisted: config.whitelisted,
         }
     }
 
