@@ -5,7 +5,14 @@ use {
     genesis_json::ChainID,
     inquire::{validator::Validation, Select},
     interactive_clap::{ResultFromCli, ToCliArgs},
-    std::{cell::Cell, collections::BTreeMap, error::Error, fmt::Display, str::FromStr},
+    solana_sdk::pubkey::Pubkey,
+    std::{
+        cell::Cell,
+        collections::{BTreeMap, BTreeSet},
+        error::Error,
+        fmt::Display,
+        str::FromStr,
+    },
     strum::{EnumDiscriminants, EnumIter, EnumMessage, IntoEnumIterator},
 };
 
@@ -557,6 +564,9 @@ impl From<Config> for genesis_json::GenesisConfig {
                 token_name: config.token_name,
                 chain_id: config.chain_id.into(),
                 start_hardfork: config.hardfork,
+                // TODO: initialize these two fields properly
+                gas_price: U256::from(4242),
+                whitelisted: BTreeSet::from([Pubkey::new_from_array([42; 32])]),
             },
             alloc: genesis_json::GenesisAlloc(alloc),
             auxiliary: genesis_json::OptionalConfig {

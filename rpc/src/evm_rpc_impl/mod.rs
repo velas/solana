@@ -1321,6 +1321,7 @@ impl TraceERPC for TraceErpcImpl {
                 let mut executor = evm_state::Executor::with_config(
                     evm_state.clone(),
                     evm_state::ChainContext::new(last_hashes),
+                    U256::from(4242),
                     evm_config,
                     evm_state::executor::FeatureSet::new(
                         unsigned_tx_fix,
@@ -1459,6 +1460,7 @@ fn call_many(
     let mut executor = evm_state::Executor::with_config(
         evm_state,
         evm_state::ChainContext::new(last_hashes),
+        U256::from(4242), // TODO: Fix Gas Price
         estimate_config,
         evm_state::executor::FeatureSet::new(
             bank.feature_set

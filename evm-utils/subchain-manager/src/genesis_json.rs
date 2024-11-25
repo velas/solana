@@ -3,7 +3,13 @@ use {
     evm_rpc::Bytes,
     evm_state::{H160, H256, U256},
     serde::{Deserialize, Serialize},
-    std::{collections::BTreeMap, fmt::Display, str::FromStr, u64},
+    solana_sdk::pubkey::Pubkey,
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        fmt::Display,
+        str::FromStr,
+        u64,
+    },
 };
 #[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
@@ -68,6 +74,12 @@ pub struct ChainConfig {
 
     #[serde(default)]
     pub token_name: String,
+
+    #[serde(default)]
+    pub gas_price: U256,
+
+    #[serde(default)]
+    pub whitelisted: BTreeSet<Pubkey>,
     // Subchain administrator is only abble to configure evm-runtime.
     // Most of consensus fields irrelevant to evm bytecode implementation.
     // So commented out.

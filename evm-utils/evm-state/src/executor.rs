@@ -198,10 +198,10 @@ impl FeatureSet {
 #[derive(Debug, Clone)]
 pub struct Executor {
     pub evm_backend: EvmBackend<Incomming>,
-    pub feature_set: FeatureSet,
     chain_context: ChainContext,
     config: EvmConfig,
     gas_price: U256,
+    pub feature_set: FeatureSet,
 }
 
 impl Executor {
@@ -209,7 +209,7 @@ impl Executor {
         Self::with_config(
             Default::default(),
             Default::default(),
-            U256::from(1), // TODO: Set default gas price
+            U256::from(4242), // TODO: Set default gas price
             Default::default(),
             FeatureSet::new_with_all_enabled(),
         )
