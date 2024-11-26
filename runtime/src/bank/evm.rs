@@ -10,7 +10,7 @@ use {
     },
     solana_sdk::{
         feature_set,
-        hash::Hash,
+        hash::{Hash, Hasher},
         recent_evm_blockhashes_account,
         signature::{Keypair, Signature},
         signer::Signer,
@@ -91,28 +91,31 @@ impl Bank {
         let mut measure = Measure::start("commit-evm-block-ms");
 
         let old_root = self.evm().main_chain().state().last_root();
-
-          let hash = self
+        let last_native_blockhash = self.last_blockhash().to_bytes();
+        let hash = self
             .evm
             .main_chain()
             .state_write()
-            .try_commit(self.slot(), last_blockhash)
+            .try_commit(self.slot(), last_native_blockhash)
             .expect("failed to commit evm");
 
+        let mut changed_subchain = false;
         // TODO: cleanup default?
         for mut chain in self.evm.side_chains().iter_mut() {
             let subchain_old_root = chain.evm_state.last_root();
+
             let Some((_block_hash, changes)) = chain
                 .value_mut()
                 .evm_state
                 //TODO: apply block_hash on subchain
-                .try_commit(self.slot(), last_blockhash)
+                .try_commit(self.slot(), last_native_blockhash)
                 .expect("failed to commit evm")
             else {
                 // nothing to do
                 continue;
             };
             chain.evm_changed_list = Some((subchain_old_root, changes));
+            changed_subchain = true;
         }
 
         measure.stop();
@@ -126,22 +129,24 @@ impl Bank {
             self.evm.main_chain().state().block_number()
         );
 
+        let changed_main_chain = hash.is_some();
         if let Some((hash, changes)) = hash {
             let mut w_evm_blockhash_queue = self.evm.main_chain().blockhashes_write();
             *self.evm.main_chain().changed_list_write() = Some((old_root, changes));
 
+            w_evm_blockhash_queue.insert_hash(hash);
+            if self.fix_recent_blockhashes_sysvar_evm() {
+                self.update_recent_evm_blockhashes_locked(&w_evm_blockhash_queue);
+            }
+        }
+        if changed_main_chain || changed_subchain {
             let subchain_roots = self.evm.subchain_roots();
-
             // TODO: feature_subchain
             self.evm
                 .main_chain()
                 .state_write()
                 .reregister_slot(self.slot(), subchain_roots)
                 .expect("Failed to change slot");
-            w_evm_blockhash_queue.insert_hash(hash);
-            if self.fix_recent_blockhashes_sysvar_evm() {
-                self.update_recent_evm_blockhashes_locked(&w_evm_blockhash_queue);
-            }
         }
     }
 
@@ -175,6 +180,25 @@ impl Bank {
     fn fix_recent_blockhashes_sysvar_evm(&self) -> bool {
         self.feature_set
             .is_active(&feature_set::velas::hardfork_pack::id())
+    }
+    pub fn hash_evm_internal_state(&self) -> evm_state::H256 {
+        let evm_state_root = if self
+            .feature_set
+            .is_active(&feature_set::velas::evm_subchain::id())
+        {
+            let last_blockhash = self.evm.main_chain().state().last_root();
+            let subchain_roots = self.evm.subchain_roots();
+            let mut hasher = Hasher::default();
+            hasher.hash(last_blockhash.as_ref());
+            for subchain_root in subchain_roots.iter() {
+                hasher.hash(subchain_root.as_ref());
+            }
+            let hash = evm_state::H256::from_slice(&hasher.result().to_bytes());
+            hash
+        } else {
+            self.evm.main_chain().state().last_root()
+        };
+        evm_state_root
     }
 }
 
@@ -267,13 +291,18 @@ mod evmtests {
 
     use {
         crate::bank::Bank,
-        evm_state::{AccountProvider, EvmState, FromKey, H160, TEST_CHAIN_ID, U256},
+        evm_state::{
+            empty_trie_hash, AccountProvider, EvmState, FromKey, H160, TEST_CHAIN_ID, U256,
+        },
         log::*,
         solana_evm_loader_program::{
             instructions::AllocAccount, precompiles::ETH_TO_VLX_ADDR,
             processor::SUBCHAIN_CREATION_DEPOSIT_VLX, scope::evm::lamports_to_wei,
         },
-        solana_program_runtime::{evm_executor_context::StateExt, timings::ExecuteTimings},
+        solana_program_runtime::{
+            evm_executor_context::{EvmExecutorContext, StateExt},
+            timings::ExecuteTimings,
+        },
         solana_sdk::{
             account::ReadableAccount,
             clock::MAX_PROCESSING_AGE,
@@ -283,7 +312,8 @@ mod evmtests {
             pubkey::Pubkey,
             transaction::{Transaction, TransactionError},
         },
-        std::sync::Arc,
+        solana_zk_token_sdk::encryption::pedersen::H,
+        std::{collections::BTreeMap, sync::Arc},
     };
     #[allow(deprecated)]
     use {
@@ -1023,24 +1053,6 @@ mod evmtests {
     }
 
     #[test]
-    fn send_evm_subchain_tx() {
-        // Add check that after creating, and sending tx subchain evm_state is changed but it last_root is not.
-        todo!();
-        // 1. create bank
-        // get last_root of main and sub_chain
-        // 2. create subchain account
-        // 3. check_roots()  == 1
-        // 4. bank.freeze() bank = bank.from_parent()
-        // 5. check_roots()  != 3
-        // 6. let prev = get_evm_state()
-        // 7. send_subchain_tx()
-        // 8. check_evm_state(prev)
-        // 9. check_roots() == 5
-        // 10. bank.freeze()
-        // 11. check_roots() != 9
-    }
-
-    #[test]
     fn create_evm_subchain_regular() {
         solana_logger::setup_with("trace");
         let tx = solana_evm_loader_program::processor::dummy_call(0).0;
@@ -1215,5 +1227,201 @@ mod evmtests {
             get_wei_balance(&bank, subchain_id, *ETH_TO_VLX_ADDR),
             lamports_to_wei(3_000_000)
         );
+    }
+
+    // Init deposit to account (replace original state of account)
+    fn deposit_init(state: &mut EvmState, addr: H160, lamports: u64) {
+        match state {
+            EvmState::Incomming(ref mut i) => i.set_account_state(
+                addr,
+                evm_state::AccountState {
+                    balance: lamports_to_wei(lamports),
+                    ..Default::default()
+                },
+            ),
+            _ => panic!("Not expected state"),
+        }
+    }
+
+    fn get_root_counts(bank: &Bank, root: H256) -> usize {
+        let state = bank.evm().main_chain().state();
+        let storage = state.kvs();
+        storage.gc_count(root).unwrap() as usize
+    }
+
+    #[test]
+    fn test_register_slots_and_lastroots() {
+        solana_logger::setup_with("trace");
+        let mut root_hashes_main = vec![];
+        let mut root_hashes_subchain = vec![];
+        let chain_id = 0x561;
+        // 1. Create bank
+        // 2. Do tx in mainchain
+        // 3. create bank2 from parent
+        // 4. create subchain
+        // 5. create bank3 from parent
+        // 6. do subchain tx
+        // 7. create bank4 from parent
+        // 8. create new bank5 from parent
+        // cleanup bank1 (check roots count)
+        // cleanup bank2 (check roots count)
+        // cleanup bank3 (check roots count)
+        // cleanup bank4 (check roots count)
+        // cleanup bank5 (check roots count)
+
+        let (genesis_config, mint_keypair) = create_genesis_config(LAMPORTS_PER_VLX * 1_000_001);
+
+        let recent_blockhash = genesis_config.hash();
+        let mut bank = Bank::new_for_tests(&genesis_config);
+        bank.activate_feature(&feature_set::velas::native_swap_in_evm_history::id());
+        bank.activate_feature(&feature_set::velas::evm_new_error_handling::id());
+        bank.activate_feature(&feature_set::velas::evm_instruction_borsh_serialization::id());
+        bank.activate_feature(&feature_set::velas::evm_subchain::id());
+
+        let bank = Arc::new(bank);
+        // change genesis balance on mainchain
+        let pk = solana_evm_loader_program::processor::dummy_call(0)
+            .0
+            .caller()
+            .unwrap();
+        deposit_init(
+            &mut *bank.evm().main_chain().evm_state.write().unwrap(),
+            pk,
+            1_000,
+        );
+        // deposit_init(&mut bank.evm().chain_state_write(chain_id).evm_state,pk, 1_000);
+        bank.freeze();
+        root_hashes_main.push(bank.evm().main_chain().state().last_root());
+        root_hashes_subchain.push(empty_trie_hash()); //chain_state() indirectly create empty executor
+
+        let bank1 = Arc::new(Bank::new_from_parent(&bank, &Pubkey::default(), 1));
+        let evm_tx = solana_evm_loader_program::processor::dummy_call(0).0;
+        let ix = solana_evm_loader_program::send_raw_tx(
+            mint_keypair.pubkey(),
+            evm_tx,
+            None,
+            solana_evm_loader_program::instructions::FeePayerType::Evm,
+        );
+        let tx = Transaction::new(
+            &[&mint_keypair],
+            Message::new(&[ix], Some(&mint_keypair.pubkey())),
+            recent_blockhash,
+        );
+        bank1.process_transaction(&tx).unwrap();
+        bank1.freeze();
+        root_hashes_main.push(bank1.evm().main_chain().state().last_root());
+        root_hashes_subchain.push(empty_trie_hash()); //chain_state() indirectly create empty executor
+
+        let last = root_hashes_main.len() - 1;
+        assert!(root_hashes_main[last - 1] != root_hashes_main[last]);
+        assert!(root_hashes_subchain[last - 1] == root_hashes_subchain[last]);
+        let bank2 = Arc::new(Bank::new_from_parent(&bank1, &Pubkey::default(), 2));
+        let tx = create_subchain_with_preseed(&mint_keypair, pk, chain_id, recent_blockhash, 20000);
+        bank2.process_transaction(&tx).unwrap();
+
+        bank2.freeze();
+
+        root_hashes_main.push(bank2.evm().main_chain().state().last_root());
+        root_hashes_subchain.push(bank2.evm().chain_state(chain_id).state().last_root());
+        let last = root_hashes_main.len() - 1;
+        assert!(root_hashes_main[last - 1] == root_hashes_main[last]);
+        assert!(root_hashes_subchain[last - 1] != root_hashes_subchain[last]);
+
+        let bank3 = Arc::new(Bank::new_from_parent(&bank2, &Pubkey::default(), 3));
+        let hash = bank3.hash_evm_internal_state();
+        let subchain_evm_tx =
+            solana_evm_loader_program::processor::dummy_call_with_chain_id(0, chain_id).0;
+        let ix = solana_evm_loader_program::send_raw_tx_subchain(
+            mint_keypair.pubkey(),
+            subchain_evm_tx,
+            None,
+            chain_id,
+        );
+        let tx = Transaction::new(
+            &[&mint_keypair],
+            Message::new(&[ix], Some(&mint_keypair.pubkey())),
+            recent_blockhash,
+        );
+        bank3.process_transaction(&tx).unwrap();
+
+        bank3.freeze();
+        let hash2 = bank3.hash_evm_internal_state();
+        assert_ne!(hash, hash2);
+        root_hashes_main.push(bank3.evm().main_chain().state().last_root());
+        root_hashes_subchain.push(bank3.evm().chain_state(chain_id).state().last_root());
+        let last = root_hashes_main.len() - 1;
+        assert!(root_hashes_main[last - 1] == root_hashes_main[last]);
+        assert!(root_hashes_subchain[last - 1] != root_hashes_subchain[last]);
+
+        let bank4 = Arc::new(Bank::new_from_parent(&bank3, &Pubkey::default(), 4));
+        bank4.freeze();
+        root_hashes_main.push(bank4.evm().main_chain().state().last_root());
+        root_hashes_subchain.push(bank4.evm().chain_state(chain_id).state().last_root());
+        let last = root_hashes_main.len() - 1;
+        assert!(root_hashes_main[last - 1] == root_hashes_main[last]);
+        assert!(root_hashes_subchain[last - 1] == root_hashes_subchain[last]);
+
+        let bank5 = Arc::new(Bank::new_from_parent(&bank4, &Pubkey::default(), 5));
+
+        let hash = bank5.hash_evm_internal_state();
+        bank5.freeze();
+        // LAST_ROOTS check that fork produce same hash
+        let hash2 = bank5.hash_evm_internal_state();
+        assert_eq!(hash, hash2);
+        root_hashes_main.push(bank5.evm().main_chain().state().last_root());
+        root_hashes_subchain.push(bank5.evm().chain_state(chain_id).state().last_root());
+        let last = root_hashes_main.len() - 1;
+        assert!(root_hashes_main[last - 1] == root_hashes_main[last]);
+        assert!(root_hashes_subchain[last - 1] == root_hashes_subchain[last]);
+
+        let mut counts = BTreeMap::new();
+        for root in root_hashes_main.iter() {
+            counts.entry(*root).and_modify(|e| *e += 1).or_insert(1);
+        }
+
+        // remove first 2 subchains with emty_trie_hash
+        for root in root_hashes_subchain.iter().skip(2) {
+            counts.entry(*root).and_modify(|e| *e += 1).or_insert(1);
+        }
+        println!("root_hashes_main {:?}", root_hashes_main);
+        println!("root_hashes_subchain {:?}", root_hashes_subchain);
+        println!("counts {:?}", counts);
+
+        for (&hash, &count) in counts.iter() {
+            assert_eq!(get_root_counts(&bank, hash), count);
+        }
+
+        let mut remove_roots = vec![];
+
+        root_hashes_main.reverse();
+        root_hashes_subchain.reverse();
+
+        let to_remove = vec![bank5, bank4, bank3, bank2];
+
+        for (num, to_remove) in to_remove.into_iter().enumerate() {
+            drop(to_remove);
+
+            let val = *counts
+                .entry(root_hashes_main[num])
+                .and_modify(|v| *v -= 1)
+                .or_insert(0);
+            if val == 0 {
+                remove_roots.push(root_hashes_main[num]);
+            }
+            let val = *counts
+                .entry(root_hashes_subchain[num])
+                .and_modify(|v| *v -= 1)
+                .or_insert(0);
+            if val == 0 {
+                remove_roots.push(root_hashes_subchain[num]);
+            }
+
+            for root in &remove_roots {
+                assert_eq!(get_root_counts(&bank, *root), 0);
+            }
+            for (&hash, &count) in counts.iter() {
+                assert_eq!(get_root_counts(&bank, hash), count);
+            }
+        }
     }
 }
