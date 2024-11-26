@@ -1269,6 +1269,10 @@ const SECRET_KEY_DUMMY: [u8; 32] = [1; 32];
 const TEST_CHAIN_ID: u64 = 0xdead;
 #[doc(hidden)]
 pub fn dummy_call(nonce: usize) -> (evm::Transaction, evm::UnsignedTransaction) {
+    dummy_call_with_chain_id(nonce, TEST_CHAIN_ID)
+}
+
+pub fn dummy_call_with_chain_id(nonce: usize, chain_id: u64) -> (evm::Transaction, evm::UnsignedTransaction) {
     let secret_key = evm::SecretKey::from_slice(&SECRET_KEY_DUMMY).unwrap();
     let dummy_address = evm::addr_from_public_key(&evm::PublicKey::from_secret_key(
         evm::SECP256K1,
@@ -1285,10 +1289,11 @@ pub fn dummy_call(nonce: usize) -> (evm::Transaction, evm::UnsignedTransaction) 
     };
 
     (
-        tx_call.clone().sign(&secret_key, Some(TEST_CHAIN_ID)),
+        tx_call.clone().sign(&secret_key, Some(chain_id)),
         tx_call,
     )
 }
+
 
 #[cfg(test)]
 mod test {

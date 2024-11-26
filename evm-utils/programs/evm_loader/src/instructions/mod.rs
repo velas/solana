@@ -280,6 +280,7 @@ impl Default for SubchainConfig {
     Serialize,
     Deserialize,
 )]
+
 // NOTE: do not forget to update `solana_transaction_status::parse_evm` when changing instruction data
 pub enum EvmSubChain {
     /// Allocate Data Account for newly created EVM Subchain

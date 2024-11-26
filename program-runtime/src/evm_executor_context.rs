@@ -268,6 +268,7 @@ impl EvmBank {
             .collect()
     }
 
+    // Return state of subchain, if not exist, creates new default
     pub fn chain_state(&self, chain_id: ChainID) -> Ref<u64, EvmChain> {
         if chain_id == self.main_chain.id() {
             panic!("Main chain state should be accessed via main_chain() method");
@@ -282,7 +283,7 @@ impl EvmBank {
             .get(&chain_id)
             .expect("Chain should be inserted")
     }
-
+    // Return state of subchain, if not exist, creates new default
     pub fn chain_state_write(&self, chain_id: ChainID) -> RefMut<u64, EvmChain> {
         if chain_id == self.main_chain.id() {
             panic!("Main chain state should be accessed via main_chain() method");

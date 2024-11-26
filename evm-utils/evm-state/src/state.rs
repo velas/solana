@@ -676,7 +676,7 @@ impl EvmState {
     pub fn try_commit(
         &mut self,
         slot: u64,
-        last_blockhash: [u8; 32],
+        last_native_blockhash: [u8; 32],
     ) -> Result<Option<(H256, ChangedState)>, anyhow::Error> {
         match self {
             EvmState::Committed(committed) => Err(anyhow::Error::msg(format!(
@@ -689,7 +689,7 @@ impl EvmState {
                         "Found non-empty evm state, committing block = {}.",
                         incomming.state.block_number
                     );
-                    let native_blockhash = H256::from_slice(&last_blockhash);
+                    let native_blockhash = H256::from_slice(&last_native_blockhash);
                     let changes = incomming.state.state_updates.clone();
                     let committed = incomming.take().commit_block(slot, native_blockhash);
                     let last_hash = committed.state.block.hash();

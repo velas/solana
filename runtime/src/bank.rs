@@ -6202,25 +6202,8 @@ impl Bank {
         let mut signature_count_buf = [0u8; 8];
         LittleEndian::write_u64(&mut signature_count_buf[..], self.signature_count());
 
-        // TODO: subchain feature
         let subchain_roots = self.evm.subchain_roots();
-
-        let evm_state_root = if self
-            .feature_set
-            .is_active(&feature_set::velas::evm_subchain::id())
-        {
-            let last_blockhash = self.evm.main_chain().state().last_root();
-            let subchain_roots = self.evm.subchain_roots();
-            let mut hasher = Hasher::default();
-            hasher.hash(last_blockhash.as_ref());
-            for subchain_root in subchain_roots.iter() {
-                hasher.hash(subchain_root.as_ref());
-            }
-            let hash = evm_state::H256::from_slice(&hasher.result().to_bytes());
-            hash
-        } else {
-            self.evm.main_chain().state().last_root()
-        };
+        let evm_state_root = self.hash_evm_internal_state();
 
         let mut hash = hashv(&[
             self.parent_hash.as_ref(),
