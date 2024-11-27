@@ -178,7 +178,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                 caller,
                 tx.clone(),
                 true,
-                true,
                 OwnedPrecompile::default(),
             ))
             .unwrap();
@@ -231,7 +230,6 @@ fn criterion_benchmark(c: &mut Criterion) {
             } = black_box(executor.transaction_execute_unsinged(
                 caller,
                 tx.clone(),
-                true,
                 true,
                 OwnedPrecompile::default(),
             ))
@@ -298,7 +296,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                 } = black_box(executor.transaction_execute_unsinged(
                     caller,
                     tx.clone(),
-                    true,
                     true,
                     OwnedPrecompile::default(),
                 ))
@@ -394,7 +391,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                     caller,
                     tx.clone(),
                     true,
-                    true,
                     OwnedPrecompile::default(),
                 ))
                 .unwrap();
@@ -459,7 +455,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                 ..
             } = black_box(executor.transaction_execute(
                 tx.clone(),
-                true,
                 true,
                 OwnedPrecompile::default(),
             ))
