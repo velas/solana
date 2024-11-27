@@ -449,7 +449,10 @@ impl ChainParam {
         }
     }
 
-    pub fn gas_price(&self) -> U256 {
+    pub fn min_gas_price(&self, is_evm_burn_fee_activated: bool) -> U256 {
+        if !is_evm_burn_fee_activated {
+            return 0.into(); // pre beta velas behaviour
+        }
         match self {
             ChainParam::GetSubchain { gas_price, .. } => *gas_price,
             _ => BURN_GAS_PRICE.into(),
@@ -523,12 +526,11 @@ impl EvmExecutorContext {
             let evm_executor = evm_state::Executor::with_config(
                 state.clone(),
                 evm_state::ChainContext::new(last_hashes),
-                params.gas_price(),
                 evm_state::EvmConfig::new(
                     params
                         .chain_id()
                         .unwrap_or_else(|| self.evm.main_chain().id()),
-                    self.is_evm_burn_fee_activated,
+                    params.min_gas_price(self.is_evm_burn_fee_activated),
                 ),
                 self.feature_set,
             );

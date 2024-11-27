@@ -345,9 +345,9 @@ impl EvmProcessor {
             }
         }
 
-        fn assert_gas_price(
+        fn assert_native_balance(
             invoke_context: &InvokeContext,
-            executor: &Executor,
+            _executor: &Executor,
             subchain_feature: bool,
             fee_type: &FeePayerType,
             fee_payer: &KeyedAccount,
@@ -357,33 +357,42 @@ impl EvmProcessor {
         ) -> Result<(), EvmError> {
             // - work only if feature enabled,
             // - on subchains or native fee payer
+
+            // TODO:
+            // if (fee_type.is_evm() && mainchain) || !subchain_feature {
+            //     return Ok(())
+            // }
+
             if subchain_feature && (fee_type.is_native() || subchain) {
-                let (max_fee, min_lamports) = if subchain {
+                let (min_gas_price, min_deposit) = if subchain {
                     (
-                        executor.config().burn_gas_price.into(),
+                        evm_state::BURN_GAS_PRICE_IN_SUBCHAIN.into(),
                         SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX,
                     )
                 } else {
                     (tx_gas_price, 0)
                 };
-                let max_fee = max_fee * tx_gas_limit;
+                // maximum amount of tokens that user can spend during tx execute (in vlx *10E-18)
+                let max_fee = min_gas_price * tx_gas_limit;
                 let max_fee_in_lamports = wei_to_lamports(max_fee).0;
+
                 let Some(amount) = fee_payer
                     .account
                     .borrow()
                     .lamports()
-                    .checked_sub(min_lamports)
+                    .checked_sub(min_deposit)
                 else {
                     ic_msg!(
                         invoke_context,
                         "Fee payer don't have min_deposit {}",
-                        min_lamports
+                        min_deposit
                     );
                     return Err(EvmError::NativeAccountInsufficientFunds);
                 };
+
                 if amount < max_fee_in_lamports {
                     if subchain {
-                        ic_msg!(invoke_context, "Fee payer has not enough lamports to pay fee, max_fee:{}, min_deposit:{}, amount:{},", max_fee_in_lamports, min_lamports, amount);
+                        ic_msg!(invoke_context, "Fee payer has not enough lamports to pay fee, max_fee:{}, min_deposit:{}, amount:{},", max_fee_in_lamports, min_deposit, amount);
                     } else {
                         ic_msg!(
                             invoke_context,
@@ -426,7 +435,7 @@ impl EvmProcessor {
                     tx.value,
                     tx.action
                 );
-                assert_gas_price(
+                assert_native_balance(
                     invoke_context,
                     &executor,
                     subchain_feature,
@@ -447,7 +456,6 @@ impl EvmProcessor {
                 executor.transaction_execute(
                     tx,
                     withdraw_fee_from_evm,
-                    is_subchain,
                     precompiles::entrypoint(
                         accounts,
                         activate_precompile,
@@ -488,7 +496,7 @@ impl EvmProcessor {
                     tx.action
                 );
 
-                assert_gas_price(
+                assert_native_balance(
                     invoke_context,
                     &executor,
                     subchain_feature,
@@ -509,7 +517,6 @@ impl EvmProcessor {
                     from,
                     tx,
                     withdraw_fee_from_evm,
-                    is_subchain,
                     precompiles::entrypoint(
                         accounts,
                         activate_precompile,
@@ -896,6 +903,8 @@ impl EvmProcessor {
 
         let full_fee = tx_gas_price * result.used_gas;
 
+        // TODO: suggested fix?
+        // let burn_fee = BURN_GAS_PRICE_IN_SUBCHAIN * result.used_gas;
         let burn_fee = executor.config().burn_gas_price * result.used_gas;
 
         let charge_from_native = burn_fee;
@@ -3722,6 +3731,71 @@ mod test {
     }
 
     #[test]
+    fn subchain_transfer_with_invalid_gasprice() {
+        todo!("Not implemented yet");
+        // let mut evm_context = EvmMockContext::new(0);
+        // let user_id = Pubkey::new_unique();
+        // let user_acc = evm_context.native_account(user_id);
+        // user_acc.set_owner(system_program::ID);
+        // user_acc.set_lamports(10000000000000000);
+
+        // let secret_key = evm::SecretKey::from_slice(&SECRET_KEY_DUMMY).unwrap();
+        // let address = secret_key.to_address();
+
+        // let to = crate::evm_address_for_program(user_id);
+        // let mut config = SubchainConfig::default();
+        // config.alloc.insert(
+        //     address,
+        //     AllocAccount::new_with_balance(lamports_to_wei(10000)),
+        // );
+
+        // let chain_id = 0x561;
+        // setup_chain(&mut evm_context, user_id, chain_id, config, 42000);
+        // //====ca
+        // let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
+        // let address = sender.to_address();
+        // let from_state_before = subchain_evm
+        //     .get_account_state(address)
+        //     .expect("Sender should exist on blockchain");
+        // let tx_transfer = evm::UnsignedTransaction {
+        //     nonce: from_state_before.nonce,
+        //     gas_price: state_before.gas_price,
+        //     gas_limit: transfer_gas_used.into(),
+        //     action: TransactionAction::Call(receiver),
+        //     value: amount,
+        //     input: vec![],
+        // };
+        // let gas = tx_transfer.gas_price * transfer_gas_used;
+        // let total = amount + gas;
+        // let tx_transfer = tx_transfer.sign(&sender, Some(chain_id));
+
+        // let tx_hash = tx_transfer.tx_id_hash();
+        // let before = subchain_evm.get_executed_transactions().len();
+
+        // let to_state_before = subchain_evm.get_account_state(receiver).unwrap_or_default();
+        // let err = evm_context
+        //     .process_instruction(crate::send_raw_tx_subchain(
+        //         bridge,
+        //         tx_transfer.clone(),
+        //         None,
+        //         chain_id,
+        //     ))
+        //     .unwrap_err();
+        // assert!(err, invalid);
+        // //===
+        // transfer_on_subchain(
+        //     &mut evm_context,
+        //     chain_id,
+        //     secret_key,
+        //     to,
+        //     10.into(),
+        //     user_id,
+        // );
+        // assert!(evm_context.evm_state.get_account_state(address).is_none());
+        // assert!(evm_context.evm_state.get_account_state(to).is_none());
+    }
+
+    #[test]
     #[should_panic(expected = "Result::unwrap()` on an `Err` value: Custom(18)")] // NativeAccountInsufficientFunds
     fn subchain_transfer_no_extra_deposit() {
         let mut evm_context = EvmMockContext::new(0);
@@ -3817,7 +3891,7 @@ mod test {
             .expect("Sender should exist on blockchain");
         let tx_transfer = evm::UnsignedTransaction {
             nonce: from_state_before.nonce,
-            gas_price: 10000.into(),
+            gas_price: state_before.gas_price,
             gas_limit: transfer_gas_used.into(),
             action: TransactionAction::Call(receiver),
             value: amount,
@@ -3862,7 +3936,7 @@ mod test {
         state_before.last_hashes = state_after.last_hashes.clone();
         assert_eq!(state_before, state_after);
 
-        let burn_fee = transfer_gas_used * evm::BURN_GAS_PRICE;
+        let burn_fee = transfer_gas_used * evm::BURN_GAS_PRICE_IN_SUBCHAIN;
         let burn_fee = wei_to_lamports(burn_fee.into()).0;
         assert_eq!(
             subchain_state_account_before.lamports() - subchain_state_account.lamports(),

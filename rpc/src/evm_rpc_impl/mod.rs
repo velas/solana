@@ -1214,7 +1214,6 @@ impl TraceERPC for TraceErpcImpl {
                     Some(tx_chain_id),
                     tx_hash,
                     true,
-                    false, // allow zero fee
                     simulation_entrypoint(
                         PrecompileSet::VelasClassic, // FIXME: encapsulate under feature activation
                         &evm_keyed_account,
@@ -1321,12 +1320,12 @@ impl TraceERPC for TraceErpcImpl {
                 let mut executor = evm_state::Executor::with_config(
                     evm_state.clone(),
                     evm_state::ChainContext::new(last_hashes),
-                    U256::from(4242),
                     evm_config,
                     evm_state::executor::FeatureSet::new(
                         unsigned_tx_fix,
                         clear_logs_on_error,
                         accept_zero_gas_price_with_native_fee,
+                        // TODO add feature
                     ),
                 );
                 debug!("running on executor = {:?}", executor);
@@ -1460,7 +1459,6 @@ fn call_many(
     let mut executor = evm_state::Executor::with_config(
         evm_state,
         evm_state::ChainContext::new(last_hashes),
-        U256::from(4242), // TODO: Fix Gas Price
         estimate_config,
         evm_state::executor::FeatureSet::new(
             bank.feature_set
@@ -1587,7 +1585,6 @@ fn call_inner(
             Some(tx_chain_id),
             tx_hash,
             true,
-            chain.is_some(), // allow zero fee
             simulation_entrypoint(
                 PrecompileSet::VelasClassic, // FIXME: encapsulate under feature activation
                 &evm_keyed_account,

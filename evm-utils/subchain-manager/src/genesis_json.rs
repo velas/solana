@@ -236,6 +236,8 @@ mod tests {
                 start_hardfork: Hardfork::Istanbul,
                 network_name: "testnet".to_string(),
                 token_name: "test".to_string(),
+                whitelisted: [Pubkey::new_from_array([15; 32])].into(),
+                gas_price: 15.into(),
             },
             auxiliary: OptionalConfig {
                 token_symbol: "".to_string(),
@@ -250,10 +252,11 @@ mod tests {
                 "startHardfork": "Istanbul",
                 "networkName": "testnet",
                 "tokenName": "test",
-
+                "gasPrice": "0xf",
+                "whitelisted": [[15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]],
             },
             "alloc": {},
-            "auxiliary": {}
+            "auxiliary": {},
         });
 
         assert_eq!(serde_json::to_value(&genesis_config).unwrap(), json);
@@ -318,6 +321,8 @@ mod tests {
                 start_hardfork: Hardfork::Istanbul,
                 network_name: "".to_string(),
                 token_name: "".to_string(),
+                gas_price: 15.into(),
+                whitelisted: [].into()
             },
             alloc: GenesisAlloc(
                 vec![
@@ -357,7 +362,9 @@ mod tests {
                 "chainId": "0x1",
                 "startHardfork": "Istanbul",
                 "networkName": "",
-                "tokenName": ""
+                "tokenName": "",
+                "whitelisted": [[15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]],
+                "gasPrice": "0xf"
             },
             "alloc": {
                 "0x2222222222222222222222222222222222222222": {
