@@ -76,7 +76,7 @@ pub struct ChainConfig {
     pub token_name: String,
 
     #[serde(default)]
-    pub gas_price: U256,
+    pub gas_price: U256, // TODO: min_gas_price?
 
     #[serde(default)]
     pub whitelisted: BTreeSet<Pubkey>,

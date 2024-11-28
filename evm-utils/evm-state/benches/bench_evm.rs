@@ -1,10 +1,7 @@
 use {
     criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput},
     evm::{ExitReason, ExitSucceed},
-    evm_state::{
-        executor::{FeatureSet, OwnedPrecompile},
-        *,
-    },
+    evm_state::{executor::OwnedPrecompile, *},
     primitive_types::{H160 as Address, H256, U256},
     sha3::{Digest, Keccak256},
     std::{collections::HashSet, iter, time::Instant},

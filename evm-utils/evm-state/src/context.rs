@@ -63,6 +63,7 @@ pub struct EvmConfig {
     /// Executor should be called with estimate purposes (count transaction in worst scenario).
     pub estimate: bool,
     pub burn_gas_price: U256,
+    pub min_gas_price: U256,
 }
 
 impl Default for EvmConfig {
@@ -74,6 +75,7 @@ impl Default for EvmConfig {
             force_chain_id: true,
             estimate: false,
             burn_gas_price: U256::zero(),
+            min_gas_price: U256::zero(),
         }
     }
 }

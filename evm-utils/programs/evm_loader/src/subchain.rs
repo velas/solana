@@ -37,7 +37,7 @@ pub struct SubchainState {
     pub owner: solana::Address,
     // Mutable state:
     pub last_hashes: BlockhashQueue,
-    pub gas_price: U256,
+    pub min_gas_price: U256,
     pub whitelisted: BTreeSet<solana::Address>, // TODO: BTreeSet != BorshSchema
 }
 
@@ -51,7 +51,7 @@ impl SubchainState {
             token_name: config.token_name,
             owner,
             last_hashes: BlockhashQueue::new(),
-            gas_price: config.gas_price,
+            min_gas_price: config.min_gas_price,
             whitelisted: config.whitelisted,
         }
     }
@@ -118,7 +118,7 @@ mod test {
             network_name: "test".to_string(),
             token_name: "test".to_string(),
             whitelisted: Default::default(),
-            gas_price: 123.into(),
+            min_gas_price: 123.into(),
         };
         let mut state = SubchainState::new(config, solana::Address::default(), 0);
         state.update(|h| h.push(H256::repeat_byte(0x11), 12));

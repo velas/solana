@@ -255,7 +255,7 @@ pub struct SubchainConfig {
     pub hardfork: Hardfork,
     pub network_name: String,
     pub token_name: String,
-    pub gas_price: U256,
+    pub min_gas_price: U256,
 }
 impl Default for SubchainConfig {
     fn default() -> Self {
@@ -265,7 +265,7 @@ impl Default for SubchainConfig {
             hardfork: Hardfork::Istanbul,
             network_name: String::new(),
             token_name: String::new(),
-            gas_price: U256::zero(),
+            min_gas_price: U256::zero(),
         }
     }
 }

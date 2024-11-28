@@ -1216,7 +1216,7 @@ impl EvmProcessor {
     ) -> Result<(), EvmError> {
         let (rc, mut refmut);
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
-        let sender_idx = if tx.is_big() { 3 } else { 2 };
+        let sender_idx = if tx.is_big() { 2 } else { 1 };
         let sender = &accounts.users[sender_idx];
         let mut state = crate::subchain::SubchainState::load(accounts)?;
 

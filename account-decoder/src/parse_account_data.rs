@@ -226,7 +226,7 @@ mod test {
                 token_name: "token_name".to_string(),
                 network_name: "network_name".to_string(),
                 whitelisted: [Pubkey::new_from_array([15; 32])].into(),
-                gas_price: 15.into(),
+                min_gas_price: 15.into(),
             },
             account_pubkey,
             1,
