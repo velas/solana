@@ -3698,7 +3698,7 @@ mod test {
         let user_id = Pubkey::new_unique();
         let user_acc = evm_context.native_account(user_id);
         user_acc.set_owner(system_program::ID);
-        user_acc.set_lamports(10000000000000000);
+        user_acc.set_lamports(10000000000000000); // 1_000_000 VLX
 
         let secret_key = evm::SecretKey::from_slice(&SECRET_KEY_DUMMY).unwrap();
         let address = secret_key.to_address();
@@ -3711,7 +3711,7 @@ mod test {
         );
 
         let chain_id = 0x561;
-        setup_chain(&mut evm_context, user_id, chain_id, config, 42000);
+        setup_chain(&mut evm_context, user_id, chain_id, config, 840000);
         transfer_on_subchain(
             &mut evm_context,
             chain_id,
@@ -3744,7 +3744,7 @@ mod test {
         // );
 
         // let chain_id = 0x561;
-        // setup_chain(&mut evm_context, user_id, chain_id, config, 42000);
+        // setup_chain(&mut evm_context, user_id, chain_id, config, 840000);
         // //====ca
         // let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
         // let address = sender.to_address();
@@ -3960,7 +3960,7 @@ mod test {
         );
 
         let chain_id = 0x561;
-        setup_chain(&mut evm_context, user_id, chain_id, config, 42000 * 3);
+        setup_chain(&mut evm_context, user_id, chain_id, config, 840000 * 3);
 
         // multiple finalize should not create multiple blocks
         evm_context.commit_state();
