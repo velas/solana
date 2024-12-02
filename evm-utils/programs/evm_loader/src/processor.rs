@@ -353,18 +353,13 @@ impl EvmProcessor {
             fee_payer: &KeyedAccount,
             tx_gas_price: U256,
             tx_gas_limit: U256,
-            subchain: bool,
+            is_subchain: bool,
         ) -> Result<(), EvmError> {
             // - work only if feature enabled,
             // - on subchains or native fee payer
 
-            // TODO:
-            // if (fee_type.is_evm() && mainchain) || !subchain_feature {
-            //     return Ok(())
-            // }
-
-            if subchain_feature && (fee_type.is_native() || subchain) {
-                let (min_gas_price, min_deposit) = if subchain {
+            if subchain_feature && (fee_type.is_native() || is_subchain) {
+                let (min_gas_price, min_deposit) = if is_subchain {
                     (
                         evm_state::BURN_GAS_PRICE_IN_SUBCHAIN.into(),
                         SUBCHAIN_CREATION_DEPOSIT_VLX * LAMPORTS_PER_VLX,
@@ -391,7 +386,7 @@ impl EvmProcessor {
                 };
 
                 if amount < max_fee_in_lamports {
-                    if subchain {
+                    if is_subchain {
                         ic_msg!(invoke_context, "Fee payer has not enough lamports to pay fee, max_fee:{}, min_deposit:{}, amount:{},", max_fee_in_lamports, min_deposit, amount);
                     } else {
                         ic_msg!(
@@ -903,9 +898,7 @@ impl EvmProcessor {
 
         let full_fee = tx_gas_price * result.used_gas;
 
-        // TODO: suggested fix?
-        // let burn_fee = BURN_GAS_PRICE_IN_SUBCHAIN * result.used_gas;
-        let burn_fee = executor.config().burn_gas_price * result.used_gas;
+        let burn_fee: U256 = U256::from(evm_state::BURN_GAS_PRICE_IN_SUBCHAIN) * result.used_gas;
 
         let charge_from_native = burn_fee;
         let return_to_zero_addr = full_fee;
@@ -1229,8 +1222,9 @@ impl EvmProcessor {
             return Err(EvmError::EVMSubchainExecutionForbidden);
         }
         let last_hashes = Box::new(state.last_hashes().get_hashes().clone());
-        let executor = get_executor!(rc, refmut => invoke_context, chain_id, last_hashes);
         // TODO(L): How to deal with reborrowing?? (we neeed last hashes from account to create executor, but to get it we need to borrow invoke context.)
+        let executor =
+            get_executor!(rc, refmut => invoke_context, chain_id, last_hashes, state.min_gas_price);
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
         let Some(slot) = invoke_context.get_slot_from_evm_context() else {
             ic_msg!(invoke_context, "Evm context is empty.");
@@ -3730,9 +3724,9 @@ mod test {
         assert!(evm_context.evm_state.get_account_state(to).is_none());
     }
 
+    #[ignore = "Not implemented yet"]
     #[test]
     fn subchain_transfer_with_invalid_gasprice() {
-        todo!("Not implemented yet");
         // let mut evm_context = EvmMockContext::new(0);
         // let user_id = Pubkey::new_unique();
         // let user_acc = evm_context.native_account(user_id);
@@ -3891,7 +3885,7 @@ mod test {
             .expect("Sender should exist on blockchain");
         let tx_transfer = evm::UnsignedTransaction {
             nonce: from_state_before.nonce,
-            gas_price: state_before.gas_price,
+            gas_price: state_before.min_gas_price,
             gas_limit: transfer_gas_used.into(),
             action: TransactionAction::Call(receiver),
             value: amount,

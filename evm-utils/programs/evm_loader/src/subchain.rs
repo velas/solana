@@ -6,7 +6,7 @@ use {
         instructions::{Hardfork, SubchainConfig},
         scope::solana,
     },
-    borsh::{BorshDeserialize, BorshSchema, BorshSerialize},
+    borsh::{BorshDeserialize, BorshSerialize},
     evm_state::U256,
     solana_sdk::{account::ReadableAccount, borsh::get_instance_packed_len},
     std::collections::BTreeSet,
