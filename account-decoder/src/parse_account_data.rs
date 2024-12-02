@@ -245,13 +245,18 @@ mod test {
         let parsed = account.parsed.as_object().unwrap();
 
         let assert_field = |name: &str, value: Value| {
-            assert_eq!(parsed.get(name).unwrap(), &value);
+            assert_eq!(
+                parsed
+                    .get(name)
+                    .expect(&format!("field `{name}` not found")),
+                &value
+            );
         };
 
         assert_field("token_name", json!("token_name"));
         assert_field("chain_id", json!(1));
         assert_field("network_name", json!("network_name"));
-        assert_field("gas_price", json!("0xf"));
+        assert_field("min_gas_price", json!("0xf"));
         assert_field(
             "whitelisted",
             json!([[
