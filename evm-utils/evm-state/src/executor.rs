@@ -280,7 +280,10 @@ impl Executor {
 
         ensure!(
             gas_price <= U256::from(u64::MAX),
-            GasPriceOutOfBounds { gas_price }
+            GasPriceOutOfBounds {
+                min_gas_price: self.config.burn_gas_price,
+                gas_price
+            }
         );
 
         let native_fee_payer = !withdraw_fee;
@@ -295,7 +298,10 @@ impl Executor {
         } else {
             ensure!(
                 gas_price >= self.config.burn_gas_price,
-                GasPriceOutOfBounds { gas_price }
+                GasPriceOutOfBounds {
+                    min_gas_price: self.config.burn_gas_price,
+                    gas_price
+                }
             );
         }
 
@@ -1012,6 +1018,7 @@ mod tests {
                 )
                 .unwrap_err(),
             Error::GasPriceOutOfBounds {
+                min_gas_price: executor.config.burn_gas_price,
                 gas_price: 0.into()
             }
         );

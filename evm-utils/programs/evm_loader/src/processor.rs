@@ -387,11 +387,11 @@ impl EvmProcessor {
 
                 if amount < max_fee_in_lamports {
                     if is_subchain {
-                        ic_msg!(invoke_context, "Fee payer has not enough lamports to pay fee, max_fee:{}, min_deposit:{}, amount:{},", max_fee_in_lamports, min_deposit, amount);
+                        ic_msg!(invoke_context, "Fee payer has not enough lamports to pay fee, max_fee: {}, min_deposit: {}, amount: {}", max_fee_in_lamports, min_deposit, amount);
                     } else {
                         ic_msg!(
                             invoke_context,
-                            "Fee payer has not enough lamports to pay fee, max_fee:{}, amount:{},",
+                            "Fee payer has not enough lamports to pay fee, max_fee: {}, amount: {}",
                             max_fee_in_lamports,
                             amount
                         );
@@ -1304,6 +1304,8 @@ pub fn dummy_call_with_chain_id(
 
 #[cfg(test)]
 mod test {
+    use evm_state::BURN_GAS_PRICE_IN_SUBCHAIN;
+
     use {
         super::*,
         crate::instructions::AllocAccount,
@@ -2477,7 +2479,7 @@ mod test {
         // try to swap from EVM subchain and assert unsuccessful swap
         let swap_within_subchain = evm::UnsignedTransaction {
             nonce: 0u32.into(),
-            gas_price: BURN_GAS_PRICE.into(),
+            gas_price: BURN_GAS_PRICE_IN_SUBCHAIN.into(),
             gas_limit: 300000u32.into(),
             action: TransactionAction::Call(*precompiles::ETH_TO_VLX_ADDR),
             value: lamports_to_wei(3_000_000),
@@ -2518,7 +2520,7 @@ mod test {
 
         assert_eq!(native_pseudoswap_acc.balance, lamports_to_wei(3_000_000));
 
-        let fee_lamports = 42408;
+        let fee_lamports = 848160;
         assert_eq!(bob_acc.balance, lamports_to_wei(17_000_000 - fee_lamports));
     }
 
@@ -3724,69 +3726,73 @@ mod test {
         assert!(evm_context.evm_state.get_account_state(to).is_none());
     }
 
-    #[ignore = "Not implemented yet"]
     #[test]
     fn subchain_transfer_with_invalid_gasprice() {
-        // let mut evm_context = EvmMockContext::new(0);
-        // let user_id = Pubkey::new_unique();
-        // let user_acc = evm_context.native_account(user_id);
-        // user_acc.set_owner(system_program::ID);
-        // user_acc.set_lamports(10000000000000000);
+        let mut evm_context = EvmMockContext::new(100_000_000_000);
+        let owner_pub = Pubkey::new_unique();
+        let owner_acc = evm_context.native_account(owner_pub);
+        owner_acc.set_owner(system_program::ID);
+        owner_acc.set_lamports(10_000_000_000_000_000);
 
-        // let secret_key = evm::SecretKey::from_slice(&SECRET_KEY_DUMMY).unwrap();
-        // let address = secret_key.to_address();
+        let alice = evm::SecretKey::from_slice(&SECRET_KEY_DUMMY).unwrap();
+        let alice_pub = alice.to_address();
+        let bob = evm::SecretKey::from_slice(&[2; 32]).unwrap();
+        let bob_pub = bob.to_address();
 
-        // let to = crate::evm_address_for_program(user_id);
-        // let mut config = SubchainConfig::default();
-        // config.alloc.insert(
-        //     address,
-        //     AllocAccount::new_with_balance(lamports_to_wei(10000)),
-        // );
+        let subchain_min_gas_gwei = 42;
+        let mut config = SubchainConfig {
+            min_gas_price: U256::from(subchain_min_gas_gwei) * U256::exp10(9),
+            ..Default::default()
+        };
+        config.alloc.insert(
+            alice_pub,
+            AllocAccount::new_with_balance(lamports_to_wei(100_000_000_000)), // 100 VLX
+        );
 
-        // let chain_id = 0x561;
-        // setup_chain(&mut evm_context, user_id, chain_id, config, 840000);
-        // //====ca
-        // let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
-        // let address = sender.to_address();
-        // let from_state_before = subchain_evm
-        //     .get_account_state(address)
-        //     .expect("Sender should exist on blockchain");
-        // let tx_transfer = evm::UnsignedTransaction {
-        //     nonce: from_state_before.nonce,
-        //     gas_price: state_before.gas_price,
-        //     gas_limit: transfer_gas_used.into(),
-        //     action: TransactionAction::Call(receiver),
-        //     value: amount,
-        //     input: vec![],
-        // };
-        // let gas = tx_transfer.gas_price * transfer_gas_used;
-        // let total = amount + gas;
-        // let tx_transfer = tx_transfer.sign(&sender, Some(chain_id));
+        let chain_id = 0x561;
 
-        // let tx_hash = tx_transfer.tx_id_hash();
-        // let before = subchain_evm.get_executed_transactions().len();
+        setup_chain(
+            &mut evm_context,
+            owner_pub,
+            chain_id,
+            config,
+            100_000_000_000,
+        );
 
-        // let to_state_before = subchain_evm.get_account_state(receiver).unwrap_or_default();
-        // let err = evm_context
-        //     .process_instruction(crate::send_raw_tx_subchain(
-        //         bridge,
-        //         tx_transfer.clone(),
-        //         None,
-        //         chain_id,
-        //     ))
-        //     .unwrap_err();
-        // assert!(err, invalid);
-        // //===
-        // transfer_on_subchain(
-        //     &mut evm_context,
-        //     chain_id,
-        //     secret_key,
-        //     to,
-        //     10.into(),
-        //     user_id,
-        // );
-        // assert!(evm_context.evm_state.get_account_state(address).is_none());
-        // assert!(evm_context.evm_state.get_account_state(to).is_none());
+        let mut try_transfer = |min_gas_gwei: u64| -> Result<(), InstructionError> {
+            let gas_price = U256::from(min_gas_gwei) * U256::exp10(9);
+            let nonce = {
+                let subchain_evm = evm_context.subchains.get(&chain_id).unwrap();
+                let from_state_before = subchain_evm
+                    .get_account_state(alice_pub)
+                    .expect("Sender should exist on blockchain");
+                from_state_before.nonce
+            };
+
+            let tx_transfer = evm::UnsignedTransaction {
+                nonce,
+                gas_price,
+                gas_limit: 21000.into(),
+                action: TransactionAction::Call(bob_pub),
+                value: lamports_to_wei(100),
+                input: vec![],
+            };
+            let tx_transfer = tx_transfer.sign(&alice, Some(chain_id));
+
+            evm_context.process_instruction(crate::send_raw_tx_subchain(
+                owner_pub,
+                tx_transfer.clone(),
+                None,
+                chain_id,
+            ))
+        };
+
+        assert_eq!(
+            try_transfer(subchain_min_gas_gwei - 1).unwrap_err(),
+            InstructionError::Custom(3) // EvmError::InternalExecutorError
+        );
+
+        assert!(try_transfer(subchain_min_gas_gwei + 1).is_ok(),);
     }
 
     #[test]
