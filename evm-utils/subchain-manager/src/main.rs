@@ -1,18 +1,11 @@
 use {
     color_eyre::eyre::WrapErr,
     evm_rpc::{Bytes, FormatHex},
-    evm_state::U256,
+    evm_state::{BURN_GAS_PRICE_IN_SUBCHAIN, U256},
     genesis_json::ChainID,
     inquire::{validator::Validation, Select},
     interactive_clap::{ResultFromCli, ToCliArgs},
-    solana_sdk::pubkey::Pubkey,
-    std::{
-        cell::Cell,
-        collections::{BTreeMap, BTreeSet},
-        error::Error,
-        fmt::Display,
-        str::FromStr,
-    },
+    std::{cell::Cell, collections::BTreeMap, error::Error, fmt::Display, str::FromStr},
     strum::{EnumDiscriminants, EnumIter, EnumMessage, IntoEnumIterator},
 };
 
@@ -564,9 +557,8 @@ impl From<Config> for genesis_json::GenesisConfig {
                 token_name: config.token_name,
                 chain_id: config.chain_id.into(),
                 start_hardfork: config.hardfork,
-                // TODO: initialize these two fields properly
-                gas_price: U256::from(4242),
-                whitelisted: BTreeSet::from([Pubkey::new_from_array([42; 32])]),
+                gas_price: U256::from(BURN_GAS_PRICE_IN_SUBCHAIN),
+                whitelisted: [].into(),
             },
             alloc: genesis_json::GenesisAlloc(alloc),
             auxiliary: genesis_json::OptionalConfig {
