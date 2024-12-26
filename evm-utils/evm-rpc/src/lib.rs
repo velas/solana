@@ -415,7 +415,7 @@ pub mod trace {
             #[serde(rename = "creationMethod")]
             creation_method: CreateScheme,
         },
-        // TODO: Trace suicide?!
+        // TODO(L): Trace suicide?!
         // Suicide {
         //     address: Address,
         //     refund_address: Address,
@@ -533,7 +533,7 @@ pub mod trace {
     }
     impl Trace {
         fn result_from(result: evm_state::executor::Res) -> (Res, Option<String>) {
-            // TODO: Add rest errors panic!()/todo!(), and other keywords for better search.
+            // TODO(L): Add rest errors panic!()/todo!(), and other keywords for better search.
             let error = match result.reason {
                 evm_state::ExitReason::Succeed(_) => None,
                 evm_state::ExitReason::Revert(_) => {
@@ -1287,7 +1287,6 @@ impl RPCReceipt {
 
         let (status, error) =
             match handle_evm_exit_reason(receipt.status, exit_data.unwrap_or_default()) {
-                // todo use data
                 Ok(_) => (1, None),
                 Err(e) => (0, Some(e.into())),
             };

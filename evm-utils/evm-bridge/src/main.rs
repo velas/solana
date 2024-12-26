@@ -616,8 +616,8 @@ impl BridgeERPC for BridgeErpcImpl {
                 })?;
             let tx: evm::Transaction = tx.into();
 
-            // TODO: Check chain_id.
-            // TODO: check gas price.
+            // TODO(L): Check chain_id.
+            // TODO(L): check gas price.
 
             let unsigned_tx: evm::UnsignedTransaction = tx.clone().into();
             let hash = unsigned_tx.signing_hash(Some(meta.evm_chain_id));
@@ -647,7 +647,6 @@ impl GeneralERPC for GeneralErpcProxy {
     }
 
     #[instrument]
-    // TODO: Add network info
     fn is_listening(&self, _meta: Self::Metadata) -> EvmResult<bool> {
         Ok(true)
     }
@@ -664,7 +663,7 @@ impl GeneralERPC for GeneralErpcProxy {
 
     #[instrument]
     fn sha3(&self, _meta: Self::Metadata, bytes: Bytes) -> EvmResult<H256> {
-        // TODO: try `Ok(H256(Keccak256::digest(&bytes.0).try_into().unwrap()))`
+        // TODO(L): try `Ok(H256(Keccak256::digest(&bytes.0).try_into().unwrap()))`
         Ok(H256::from_slice(
             Keccak256::digest(bytes.0.as_slice()).as_slice(),
         ))
@@ -832,10 +831,8 @@ impl ChainERPC for ChainErpcProxy {
         meta: Self::Metadata,
         tx_hash: H256,
     ) -> BoxFuture<EvmResult<Option<RPCTransaction>>> {
-        // TODO: chain all possible outcomes properly
         if let Some(tx) = meta.pool.transaction_by_hash(tx_hash) {
             if let Ok(tx) = RPCTransaction::from_transaction((**tx).clone().into()) {
-                // TODO: should we `patch` tx?
                 return Box::pin(ready(Ok(Some(tx))));
             }
         }

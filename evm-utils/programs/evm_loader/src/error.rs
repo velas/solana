@@ -1,7 +1,8 @@
-use num_derive::{FromPrimitive, ToPrimitive};
-use solana_sdk::decode_error::DecodeError;
-
-use snafu::Snafu;
+use {
+    num_derive::{FromPrimitive, ToPrimitive},
+    snafu::Snafu,
+    solana_sdk::decode_error::DecodeError,
+};
 
 /// Reasons the evm execution can fail.
 #[derive(Debug, Clone, PartialEq, FromPrimitive, ToPrimitive, Snafu)]
@@ -62,7 +63,7 @@ pub enum EvmError {
     OverflowInRefund,
 
     #[snafu(display("Native account has not enough tokens."))]
-    NativeAccountInsufficientFunds, // TODO: can we merge this with SwapInsufficient?
+    NativeAccountInsufficientFunds,
 
     #[snafu(display("Precompile error"))]
     PrecompileError,

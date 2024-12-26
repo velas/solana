@@ -52,8 +52,6 @@ impl genesis_json::GenesisConfig {
             })
             .collect();
 
-        // let mint = todo!("{:?}", mint);
-
         let config = solana_evm_loader_program::instructions::SubchainConfig {
             token_name: self.config.token_name.clone(),
             network_name: self.config.network_name.clone(),

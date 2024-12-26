@@ -183,10 +183,9 @@ impl EvmProcessor {
             }
             _ => {
                 // bind variable to increase lifetime of temporary RefCell borrow.
-                // TODO: refactor me
                 let (rc, mut refmut);
                 let executor = get_executor!(rc, refmut => invoke_context);
-                // TODO: reduce Double create in `EvmInstruction::EvmSubchain`.
+                // TODO(L): reduce Double create in `EvmInstruction::EvmSubchain`.
                 let accounts = Self::build_account_structure(first_keyed_account, invoke_context)?;
 
                 trace!("Run evm exec with ix = {:?}.", ix);
@@ -322,7 +321,7 @@ impl EvmProcessor {
             start_idx += 1;
         }
 
-        // TODO: Add logic for fee collector
+        // TODO(L): Add logic for fee collector
         let (sender, _fee_collector) = (
             accounts.users.get(start_idx),
             accounts.users.get(start_idx + 1),
@@ -334,7 +333,7 @@ impl EvmProcessor {
             return Err(EvmError::MissingRequiredSignature);
         }
 
-        // TODO: Remove swap precompile for subchain.
+        // TODO(C): Remove swap precompile for subchain.
         fn precompile_set(
             support_precompile: bool,
             evm_new_precompiles: bool,
@@ -823,16 +822,8 @@ impl EvmProcessor {
             );
             return Err(EvmError::MissingRequiredSignature);
         }
-
-        // TODO: add check that `storage_account` is not PDA (not multichain account)
-        // Probably check is not needed since we already know it is a signer thus it can not be a PDA
-        // if !storage_account.unsigned_key().is_on_curve() {
-        //     ic_msg!(
-        //         invoke_context,
-        //         "EvmBigTransaction: Storage should not be a PDA"
-        //     );
-        //     return Err(EvmError::IntroduceSomeNewErrorForThatCase);
-        // }
+        // evm_subchain_state is PDA with evm_program owner, so it should not be signer.
+        // And we can assume that this account is storage.
 
         storage_account
             .try_account_ref_mut()
@@ -949,7 +940,6 @@ impl EvmProcessor {
             EvmError::InternalExecutorError
         })?;
 
-        // TODO: Skip on subchain.
         if remove_native_logs_after_swap {
             executor.modify_tx_logs(result.tx_id, |logs| {
                 if let Some(logs) = logs {
@@ -1188,11 +1178,9 @@ impl EvmProcessor {
             })?;
 
         let (rc, mut refmut);
-
         let executor = get_executor!(rc, refmut => invoke_context, subchain_id);
-        // TODO: Drop executor on error?
-        // Load pre-seed
 
+        // Load pre-seed
         executor.evm_backend.set_initial(alloc.clone());
 
         for (evm_address, account) in alloc {
@@ -1216,7 +1204,7 @@ impl EvmProcessor {
         let mut state = crate::subchain::SubchainState::load(accounts)?;
         let last_hashes = Box::new(state.last_hashes().get_hashes().clone());
         let executor = get_executor!(rc, refmut => invoke_context, chain_id, last_hashes);
-        // TODO: How to deal with reborrowing?? (we neeed last hashes from account to create executor, but to get it we need to borrow invoke context.)
+        // TODO(L): How to deal with reborrowing?? (we neeed last hashes from account to create executor, but to get it we need to borrow invoke context.)
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
         let Some(slot) = invoke_context.get_slot_from_evm_context() else {
             ic_msg!(invoke_context, "Evm context is empty.");
@@ -1272,7 +1260,10 @@ pub fn dummy_call(nonce: usize) -> (evm::Transaction, evm::UnsignedTransaction) 
     dummy_call_with_chain_id(nonce, TEST_CHAIN_ID)
 }
 
-pub fn dummy_call_with_chain_id(nonce: usize, chain_id: u64) -> (evm::Transaction, evm::UnsignedTransaction) {
+pub fn dummy_call_with_chain_id(
+    nonce: usize,
+    chain_id: u64,
+) -> (evm::Transaction, evm::UnsignedTransaction) {
     let secret_key = evm::SecretKey::from_slice(&SECRET_KEY_DUMMY).unwrap();
     let dummy_address = evm::addr_from_public_key(&evm::PublicKey::from_secret_key(
         evm::SECP256K1,
@@ -1288,12 +1279,8 @@ pub fn dummy_call_with_chain_id(nonce: usize, chain_id: u64) -> (evm::Transactio
         input: vec![],
     };
 
-    (
-        tx_call.clone().sign(&secret_key, Some(chain_id)),
-        tx_call,
-    )
+    (tx_call.clone().sign(&secret_key, Some(chain_id)), tx_call)
 }
-
 
 #[cfg(test)]
 mod test {
@@ -2221,7 +2208,7 @@ mod test {
             ));
         }
 
-        // TODO: Assert that tx executed with result.
+        // TODO(L): Assert that tx executed with result. Check storage, receipt?
     }
 
     #[test]
@@ -2481,7 +2468,7 @@ mod test {
         }
         .sign(&bob, Some(subchain_id));
 
-        // TODO: extract into separate test
+        // TODO(L): extract into separate test
         assert_eq!(
             swap_within_subchain.input,
             [177, 214, 146, 122]
@@ -3672,7 +3659,7 @@ mod test {
             .unwrap_or_default();
         assert_eq!(evm_acc.balance, U256::from(0));
 
-        //TODO: Check account state in native chain.
+        // TODO(L): Check account state in native chain. (Deserialize state and check fields)
         // failed because already exist
         let err = evm_context
             .process_instruction(crate::create_evm_subchain_account(

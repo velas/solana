@@ -47,11 +47,6 @@ pub struct ProcessedMessageInfo {
 }
 
 impl MessageProcessor {
-    // ANCHOR - VELAS
-    // bank.rs execute_loaded_transaction -> (we have tx, declaration)
-    // message_processor.rs process_message -> (we have access to instruction and accounts, but executor created at early phase)
-    // invoke_context.rs process_instruction -> (we have access to accounts)
-
     /// Process a message.
     /// This method calls each instruction in the message over the set of loaded accounts.
     /// For each instruction it calls the program entrypoint method and verifies that the result of

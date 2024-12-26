@@ -645,13 +645,13 @@ impl RpcSolPubSubInternal for RpcSolPubSubImpl {
                         });
                     }
                 };
-                // TODO: Make more clever way to convert blockid to filter block.
+                // TODO(L): Make more clever way to convert blockid to filter block.
                 let from = match log_filter.from_block {
                     Some(evm_rpc::BlockId::Num(id)) => id.0,
                     _ => 0,
                 };
 
-                let to = match log_filter.from_block {
+                let to = match log_filter.to_block {
                     Some(evm_rpc::BlockId::Num(id)) => id.0,
                     _ => u64::MAX,
                 };

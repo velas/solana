@@ -362,7 +362,7 @@ pub mod hex_serde {
 mod tests {
     use {super::*, primitive_types::U256};
 
-    //TODO: WTF? Is Ethereum hex remove in-byte zero? Why it expect 0x1 not 0x01?
+    // WTF? Is Ethereum hex remove in-byte zero? Why it expect 0x1 not 0x01?
     #[test]
     fn hex_single_digit() {
         assert_eq!("\"0x1\"", serde_json::to_string(&Hex(U256::one())).unwrap());

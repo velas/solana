@@ -182,7 +182,6 @@ impl<'a> ExecutorContext<'a, Incomming> {
             .saturating_sub(self.backend.state.used_gas)
     }
 
-    // TODO: implement logs append for blocks.
     pub fn apply<A, I>(self, values: A, used_gas: u64)
     where
         A: IntoIterator<Item = Apply<I>>,

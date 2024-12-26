@@ -100,14 +100,14 @@ impl Bank {
             .expect("failed to commit evm");
 
         let mut changed_subchain = false;
-        // TODO: cleanup default?
+        // TODO(H): cleanup default subchains?
+        // TODO(L): assert empty if !feature_subchain
         for mut chain in self.evm.side_chains().iter_mut() {
             let subchain_old_root = chain.evm_state.last_root();
 
             let Some((_block_hash, changes)) = chain
                 .value_mut()
                 .evm_state
-                //TODO: apply block_hash on subchain
                 .try_commit(self.slot(), last_native_blockhash)
                 .expect("failed to commit evm")
             else {
@@ -141,7 +141,6 @@ impl Bank {
         }
         if changed_main_chain || changed_subchain {
             let subchain_roots = self.evm.subchain_roots();
-            // TODO: feature_subchain
             self.evm
                 .main_chain()
                 .state_write()
@@ -213,7 +212,7 @@ impl VelasEVM {
         Self::create_context(bank, EvmExecutorContextType::Execution)
     }
 
-    // TODO: Return Result<(), E>. Let caller decide how to unwrap.
+    // TODO(L): Return Result<(), E>. Let caller decide how to unwrap.
     /// # Panics
     pub fn cleanup(
         evm_executor_context: &mut EvmExecutorContext,
@@ -244,7 +243,7 @@ impl VelasEVM {
         let is_bank_frozen = bank.is_frozen();
         let is_evm_burn_fee_activated = bank.evm_burn_fee_activated();
 
-        // TODO: hardcode this feature to `true`
+        // TODO(L): hardcode this feature to `true`
         let evm_new_error_handling = bank
             .feature_set
             .is_active(&solana_sdk::feature_set::velas::evm_new_error_handling::id());

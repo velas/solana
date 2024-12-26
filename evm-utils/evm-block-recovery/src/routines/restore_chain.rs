@@ -215,7 +215,7 @@ pub async fn restore_chain(
                 .collect()
         };
 
-        // TODO: Add logic to request real hashes
+        // TODO(L): Add logic to request real hashes
         let last_hashes: Vec<H256> = vec![H256::zero(); 256];
         let state_root = header_template.state_root;
         let (restored_block, warns) =

@@ -961,8 +961,6 @@ pub(crate) struct BankFieldsToDeserialize {
     pub(crate) stakes: Stakes,
     pub(crate) epoch_stakes: HashMap<Epoch, EpochStakes>,
     pub(crate) is_delta: bool,
-    // ANCHOR - VELAS
-    // TODO: put side chain details into snapshot
     pub(crate) evm_chain_id: ChainID,
     pub(crate) evm_persist_fields: evm_state::EvmPersistState,
     pub(crate) evm_blockhashes: BlockHashEvm,
@@ -1006,8 +1004,6 @@ pub(crate) struct BankFieldsToSerialize<'a> {
     pub(crate) stakes: &'a StakesCache,
     pub(crate) epoch_stakes: &'a HashMap<Epoch, EpochStakes>,
     pub(crate) is_delta: bool,
-    // ANCHOR - VELAS
-    // TODO: put side chain details into snapshot
     pub(crate) evm_chain_id: u64,
     pub(crate) evm_persist_fields: evm_state::EvmPersistState,
     pub(crate) evm_blockhashes: &'a RwLock<BlockHashEvm>,
@@ -1015,9 +1011,6 @@ pub(crate) struct BankFieldsToSerialize<'a> {
     pub(crate) accounts_data_len: u64,
 }
 
-// ANCHOR - VELAS
-// TODO: Add side chain comparison
-// Can't derive PartialEq because RwLock doesn't implement PartialEq
 impl PartialEq for Bank {
     fn eq(&self, other: &Self) -> bool {
         if ptr::eq(self, other) {
@@ -1421,7 +1414,7 @@ impl Bank {
             accounts_data_size_delta_off_chain: AtomicI64::new(0),
             fee_structure: FeeStructure::default(),
             // ANCHOR - VELAS
-            // TODO: put evm_state argument into
+            // TODO(L): put evm_state argument into
             evm: Default::default(),
         };
 
@@ -1675,7 +1668,7 @@ impl Bank {
 
                 let subchain_roots: Vec<_> = subchains.iter().map(|c| c.1.last_root()).collect();
 
-                // TODO: feature_subchain
+                // TODO(L): assert, subchain_roots=empty on !feature_subchain
                 evm_state
                     .register_slot(slot, subchain_roots.clone())
                     .expect("failed to mark slot reference");
@@ -2082,8 +2075,6 @@ impl Bank {
             rc: bank_rc,
             src: new(),
             blockhash_queue: RwLock::new(fields.blockhash_queue),
-            // ANCHOR - VELAS
-            // TODO: deserialize chain details from snapshot
             evm: EvmBank::new(
                 fields.evm_chain_id,
                 fields.evm_blockhashes,
@@ -2208,8 +2199,6 @@ impl Bank {
         &'a self,
         ancestors: &'a HashMap<Slot, usize>,
     ) -> BankFieldsToSerialize<'a> {
-        // ANCHOR - VELAS
-        // TODO: serialize sidechains
         BankFieldsToSerialize {
             blockhash_queue: &self.blockhash_queue,
             evm_blockhashes: &self.evm().main_chain().blockhashes_raw(),
@@ -3328,7 +3317,7 @@ impl Bank {
             &evm_executor_account,
         );
         // ANCHOR - VELAS
-        // FIXME: code dup: solana_evm_loader_program::create_state_account
+        // TODO(L): code dup: solana_evm_loader_program::create_state_account
         let evm_state = Account {
             lamports: 1,
             owner: solana_sdk::evm_loader::id(),
@@ -4489,7 +4478,6 @@ impl Bank {
             executed_with_successful_result_count,
             signature_count,
             error_counters,
-            // TODO: Destruct evm_executor_context
             evm_patch: evm_executor_context.deconstruct_to_patches(),
         }
     }
@@ -5953,7 +5941,7 @@ impl Bank {
 
         let subchain_roots = self.evm.subchain_roots();
 
-        // TODO: feature_subchain
+        // TODO(L): assert, subchain_roots=empty on !feature_subchain
         self.evm
             .main_chain()
             .state_write()
@@ -7196,15 +7184,13 @@ impl Drop for Bank {
         if let Some(drop_callback) = self.drop_callback.read().unwrap().0.as_ref() {
             drop_callback.callback(self);
         } else {
-            // Default case for tests
-            // TODO: Check if bug from previos solana persist
             self.rc
                 .accounts
                 .purge_slot(self.slot(), self.bank_id(), true);
 
             if let Err(e) = handle_evm_error(&self.evm().kvs(), self.slot()) {
                 error!("Cannot purge evm_state slot: {}, error: {}", self.slot(), e)
-                //TODO: Save last hashes list, to perform cleanup if it was recoverable error.
+                //TODO(H): Save last hashes list, to perform cleanup if it was recoverable error.
             }
         }
     }
@@ -7221,9 +7207,6 @@ pub fn goto_end_of_slot(bank: &mut Bank) {
         }
     }
 }
-
-// ANCHOR - VELAS
-// TODO: Extract EVM related tests into separate scope
 
 #[cfg(test)]
 pub(crate) mod tests {

@@ -362,7 +362,7 @@ impl AbsRequestHandler {
                 }
                 let removed_roots = last_result?;
                 if !removed_roots.is_empty() {
-                    // TODO: Rewrite it as long lived RootCleanupService.
+                    // TODO(H): Rewrite it as long lived RootCleanupService.
                     let mut cleaner = evm_state::storage::RootCleanup::new(storage, removed_roots);
                     cleaner.cleanup()?
                 }
@@ -370,7 +370,7 @@ impl AbsRequestHandler {
             };
             if let Err(e) = handle_evm_error() {
                 error!("Cannot purge evm_state slot: {}, error: {}", pruned_slot, e)
-                //TODO: Save last hashes list, to perform cleanup if it was recoverable error.
+                //TODO(H): Save last hashes list, to perform cleanup if it was recoverable error.
             }
         }
 
