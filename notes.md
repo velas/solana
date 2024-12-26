@@ -1,18 +1,20 @@
 
-1. Bridge Addr in config 
-2. Increase fee for subchain = 40 gwei, 
-3. Min user_gas_price in subchain config
-4. IX: Modify subchain config
-5. 100 blocks limit in blockstore
-6. Add test for register slot with subchains + last_roots
-7. In subchain-manager - print none fields for account alloc
-8. minting_address -> alloc in subchain args 
-9. Review TODOS
-10. Fix docs to new subchain-manager format
-11. Review warnings of cargo build 
-12. Reverted transaction processing 
-13. geth --follow
-14. new eip tx format
-15. new evm version
-
-
+1. IX: Modify subchain config
+2. 100 blocks limit in blockstore
+3. In subchain-manager - print none fields for account alloc
+4. Fix docs to new subchain-manager format
+5. Review warnings of cargo build 
+6. cleanup default subchains
+7. TODO(L): assert, subchain_roots=empty on !feature_subchain
+8. TODO(H): Add incremental snapshoting
+9. TODO(L): Replace root/db/bank by root-guard.
+10. TODO(H): Save last hashes list, to perform cleanup if it was recoverable error.
+11. TODO(H): polish IX docs
+12. TODO(C): Remove swap precompile for subchain.
+13. TODO(H): Add support of block_by_num state on subchain
+14. TODO(H): get from state account
+--
+1.  Reverted transaction processing 
+2.  geth --follow
+3.  new eip tx format
+4.  new evm version

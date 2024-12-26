@@ -529,7 +529,7 @@ where
                 evm_state::Storage::open_persistent(evm_state_path, enable_gc).map_err(|e| {
                     Error::custom(format!("Unable to restore tmp evm backup storage {}", e))
                 })?;
-            // TODO: evm archive is not support sidechains
+            // TODO(L): evm archive is not support sidechains
             evm_state::storage::copy_and_purge(
                 src,
                 &[evm_archive],
@@ -562,7 +562,7 @@ where
                         evm_state::EvmBackend::new(c, storage.clone()).into()
                     }
                 },
-                // TODO:: check root exist (currently checked only on cleanup_slots)
+                // TODO(L): check root exist (currently checked only on cleanup_slots)
             ))
         })
         .collect::<Result<HashMap<_, evm_state::EvmState>, bincode::Error>>();

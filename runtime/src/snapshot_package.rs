@@ -49,7 +49,7 @@ pub struct AccountsPackage {
     pub snapshot_type: Option<SnapshotType>,
     pub evm_root: evm_state::H256,
     pub evm_db: evm_state::Storage,
-    // TODO: Replace root/db/bank by root-guard.
+    // TODO(L): Replace root/db/bank by root-guard.
     pub bank: Arc<Bank>,
 }
 

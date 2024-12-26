@@ -126,7 +126,7 @@ impl EvmChain {
     }
 }
 
-//TODO: do we need clone?
+//TODO(L): do we need clone?
 impl Clone for EvmChain {
     fn clone(&self) -> Self {
         Self {
@@ -176,7 +176,7 @@ impl MainChain {
             .expect("EVM Blockhashes RwLock was poisoned")
     }
 
-    // TODO: do not expose WriteGuard, do setter
+    // TODO(L): do not expose WriteGuard, do setter
     /// EVM Blockhashes Write Lock Guard
     pub fn blockhashes_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, BlockHashEvm> {
         self.evm_blockhashes
@@ -205,7 +205,7 @@ impl MainChain {
             .expect("EVM Blockhashes RwLock was poisoned")
     }
 
-    // TODO: do not expose WriteGuard, do setter
+    // TODO(L): do not expose WriteGuard, do setter
     /// EVM Blockhashes Write Lock Guard
     pub fn changed_list_write<'a>(&'a self) -> std::sync::RwLockWriteGuard<'a, ChangedList> {
         self.evm_changed_list
@@ -374,7 +374,7 @@ pub type Chain = Option<ChainID>;
 // 2. State for tx_batch = evm_patch::new(init_state)
 // 3. intermediate state for one tx = evm_executor::new(evm_patch)
 pub struct EvmExecutorContext {
-    // TODO: share with bank
+    // TODO(L): share with bank
     evm: EvmBank,
 
     // None chain_id = main chain
@@ -392,7 +392,7 @@ pub struct EvmExecutorContext {
     is_evm_burn_fee_activated: bool,
 
     // used for cleanup
-    // TODO: hardcode this flag to `true`
+    // TODO(L): hardcode this flag to `true`
     pub evm_new_error_handling: bool,
     clear_logs: bool,
 
@@ -430,7 +430,6 @@ impl ChainParam {
 
 impl EvmExecutorContext {
     pub fn new(
-        // TODO: EvmBank should be shared with solana::Bank
         evm: EvmBank,
         feature_set: evm_state::executor::FeatureSet,
         // NOTE: available from InvokeContext
@@ -480,7 +479,7 @@ impl EvmExecutorContext {
         }
 
         // append to old patch if exist, or create new, from existing evm state
-        // TODO: Can be inlined?
+        // TODO(L): Can be inlined?
         let patch = self.evm_patches.remove(&chain_id);
 
         if patch.is_some() && matches!(params, ChainParam::CreateSubchain { .. }) {
@@ -577,7 +576,7 @@ impl EvmExecutorContext {
                 let main_chain_state = self.get_evm_state_from_lock(self.evm.main_chain().state());
 
                 // Use main_chain kvs for new chain, but set empty trie hash root
-                // TODO: new constructor EvmBackend::new_subchain(..)
+                // TODO(L): new constructor EvmBackend::new_subchain(..)
                 main_chain_state.map(|s| EvmBackend {
                     kvs: s.kvs,
                     state: evm_state::Incomming::genesis_from_state(evm_state::empty_trie_hash()),
@@ -592,17 +591,6 @@ impl EvmExecutorContext {
             .take()
             .and_then(|rc| Rc::try_unwrap(rc.1).ok().map(|i| (rc.0, i.into_inner())))
     }
-
-    // TODO: On cleanup:
-    // for (chain_id, changed_patches) in evm_factory.destruct() {
-    // if matches!(process_result, Err(TransactionError::InstructionError(..))) {
-    //     evm_patch
-    //         .get_mut(chain_id)
-    //         .expect("Evm patch should exist, on transaction execution.")
-    //         .apply_failed_update(&changed_patches, clear_logs);
-    // } else {
-    //     *evm_patch.get_mut(chain_id).expect("Evm patch should exist, on transaction execution.") = Some(changed_patches);
-    // }
 
     pub fn cleanup(&mut self, strategy: PatchStrategy) {
         let (chain_id, executor): (_, Executor) = {

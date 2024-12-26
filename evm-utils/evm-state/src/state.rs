@@ -155,7 +155,6 @@ impl EvmBackend<Incomming> {
     /// Be sure to commit_block manually after calling this method,
     /// because it clear pending state, and is_active_changes cannot detect any state changes.
     fn flush_changes(&mut self) {
-        //todo: do in one tx
         let state = &mut self.state;
         let new_root = self
             .kvs
@@ -470,7 +469,7 @@ impl<State> EvmBackend<State> {
                 let code = self
                     .kvs
                     .get::<Codes>(code_hash)
-                    // TODO: default only when code_hash == Code::default().hash()
+                    // TODO(L): assert, default only when code_hash == Code::default().hash()
                     .unwrap_or_default();
 
                 AccountState {
@@ -801,7 +800,7 @@ mod tests {
         },
     };
 
-    const RANDOM_INCR: u64 = 1; // TODO: replace by rand::SeedableRng implementor
+    const RANDOM_INCR: u64 = 1; // TODO(L): replace by rand::SeedableRng implementor
     const MAX_SIZE: usize = 32; // Max size of test collections.
 
     const SEED: u64 = 1;

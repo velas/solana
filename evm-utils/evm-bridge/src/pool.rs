@@ -336,7 +336,7 @@ impl VerifiedTransaction for PooledTransaction {
     }
 
     fn mem_usage(&self) -> usize {
-        0 // TODO: return correct value
+        0 // TODO(L): return correct value
     }
 
     fn sender(&self) -> &Self::Sender {
@@ -770,7 +770,6 @@ async fn deploy_big_tx(
         .map_err(|e| into_native_error(e, bridge.verbose_errors))?;
 
     let write_data_txs: Vec<solana::Transaction> = tx_bytes
-        // TODO: encapsulate
         .chunks(evm_state::TX_MTU)
         .enumerate()
         .map(|(i, chunk)| {

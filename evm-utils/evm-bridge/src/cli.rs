@@ -68,7 +68,6 @@ fn default_native_keypair() -> String {
 }
 
 fn default_min_gas_price() -> U256 {
-    //TODO: Add gas logic
     // 21000 is smallest call in evm
     ceil_to_gwei((21000 * WEI_PER_LAMPORT / DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE).into())
 }

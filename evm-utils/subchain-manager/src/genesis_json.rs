@@ -71,7 +71,6 @@ pub struct ChainConfig {
     // Subchain administrator is only abble to configure evm-runtime.
     // Most of consensus fields irrelevant to evm bytecode implementation.
     // So commented out.
-    // TODO: let this fields as input paramenter in order to convert it to our config.
 
     // pub homestead_block: u64,
     // pub dao_fork_block: u64,

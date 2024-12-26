@@ -542,7 +542,6 @@ impl UnsignedTransactionWithCaller {
     }
 }
 
-// TODO: Work on logs and state_root.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TransactionReceipt {
     pub transaction: TransactionInReceipt,

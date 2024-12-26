@@ -1866,7 +1866,7 @@ pub fn verify_snapshot_archive<P, Q, R>(
     // Check snapshots are the same
     let unpacked_snapshots = unpack_dir.join("snapshots");
 
-    // TODO: Make evm-state snapshot more consistent, currently rocksdb incremental backup is
+    // TODO(L): Make evm-state snapshot more consistent, currently rocksdb incremental backup is
     // not consistent (because it support more than one backup at a time)
     // TODO(velas): uncomment this check
     assert!(!cmp_dir::is_different(&snapshots_to_verify, unpacked_snapshots, true).unwrap());
@@ -3430,7 +3430,7 @@ mod tests {
     /// information about Account1, but the full snapshost _does_ have info for Account1, which is
     /// no longer correct!
     #[test]
-    #[ignore] // TODO: Add incremental snapshoting
+    #[ignore] // TODO(H): Add incremental snapshoting
     fn test_incremental_snapshots_handle_zero_lamport_accounts() {
         solana_logger::setup();
 

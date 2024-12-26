@@ -18,7 +18,7 @@ pub use {
     primitive_types::{H160, H256, U256},
 };
 
-pub type BlockNum = u64; // TODO: re-use existing one from sdk package
+pub type BlockNum = u64;
 
 /// Blocks versions.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
@@ -147,7 +147,6 @@ impl Decodable for Code {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-// TODO: restrict roots modification anywhere outside State Apply logic
 pub struct Account {
     pub nonce: U256,
     pub balance: U256,
@@ -255,7 +254,7 @@ impl LogFilterTopicEntry {
 //     [[A, B], [A, B]] “(A OR B) in first position AND (A OR B) in second position (and anything after)”
 
 impl LogFilter {
-    // TODO: Check topic size in each
+    // TODO(L): Check topic size in each
     const LIMIT_FILTER_ITEMS: usize = 8;
     const LIMIT_ADDRESSES_SIZE: usize = 4;
 
@@ -348,7 +347,6 @@ pub struct BlockHeader {
     pub version: BlockVersion,
 }
 
-// TODO: Add transactions in block
 impl BlockHeader {
     #[allow(clippy::too_many_arguments)]
     pub fn new<'a>(

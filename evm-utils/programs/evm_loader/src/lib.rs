@@ -190,15 +190,6 @@ pub fn free_ownership(owner: solana::Address) -> solana::Instruction {
     create_evm_instruction_with_borsh(crate::ID, &EvmInstruction::FreeOwnership {}, account_metas)
 }
 
-// ANCHOR - VELAS
-// Account structure
-// "Evm1111" owned by "NativeProgram" and hold entrypoint for evm program
-// "EvmState1111" owned by "Evm1111" and hold balance for all evm accounts
-//
-// User defined accounts owned by "Evm111":
-// 1. BigTxStorage: used to store big tx data (Non PDA)
-// 2. CustomEvmStateAndConfig: used to store config for custom evm chain (PDA with "evm_state" seed)
-
 pub fn big_tx_allocate(storage: solana::Address, size: usize) -> solana::Instruction {
     let account_metas = vec![
         AccountMeta::new(solana::evm_state::ID, false),

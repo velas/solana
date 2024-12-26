@@ -73,7 +73,7 @@ where
 
 #[derive(Clone)]
 pub struct NativeContract<F, I> {
-    // TODO: Replace by real function hash calculation
+    // TODO(L): Replace by real function hash calculation
     function_hash: [u8; 4],
     pub abi: Function,
     implementation: F,
@@ -163,7 +163,7 @@ where
 // NativeContracts declaration below
 //
 // 0x56454c41532d434841494e000000000053574150 for better search
-// TODO: Implement some procedural macro to render this in more
+// TODO(L): Implement some procedural macro to render this in more
 pub static ETH_TO_VLX_ADDR: Lazy<H160> = Lazy::new(|| {
     H160::from_str(concat!(
         "56454c41532d434841494e", // 'VELAS-CHAIN'
@@ -225,9 +225,8 @@ pub static ETH_TO_VLX_CODE: Lazy<NativeContract<EthToVlxImpl, Pubkey>> = Lazy::n
             .fail();
         }
 
-        // TODO: return change back
         let lamports = wei_to_lamports(cx.precompile_context.evm_context.apparent_value).0;
-        // TODO: remove native context in handle after majority update
+        // TODO(L): remove native context in handle after majority update
         if cx.keep_old_errors {
             let user = if let Some(account) = cx.accounts.find_user(&pubkey) {
                 account

@@ -526,7 +526,6 @@ impl Executor {
         result
     }
 
-    // TODO: Handle duplicates, statuses.
     fn register_tx_with_receipt(&mut self, tx: TransactionInReceipt, result: ExecutionResult) {
         let tx_hash = match &tx {
             TransactionInReceipt::Signed(tx) => tx.tx_id_hash(),
@@ -555,7 +554,6 @@ impl Executor {
         self.evm_backend.push_transaction_receipt(tx_hash, receipt);
     }
 
-    // TODO: Make it cleaner - don't modify logs after storing, handle callback before push_transaction_receipt.
     pub fn modify_tx_logs<F, R>(&mut self, txid: H256, func: F) -> R
     where
         F: Fn(Option<&mut Vec<Log>>) -> R,
@@ -693,7 +691,7 @@ impl Executor {
     }
 }
 
-// TODO: move out these blobs to test files
+// TODO(L): move out these blobs to test files
 pub const HELLO_WORLD_CODE:&str = "608060405234801561001057600080fd5b5061011e806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063942ae0a714602d575b600080fd5b603360ab565b6040518080602001828103825283818151815260200191508051906020019080838360005b8381101560715780820151818401526020810190506058565b50505050905090810190601f168015609d5780820380516001836020036101000a031916815260200191505b509250505060405180910390f35b60606040518060400160405280600a81526020017f68656c6c6f576f726c640000000000000000000000000000000000000000000081525090509056fea2646970667358221220fa787b95ca91ffe90fdb780b8ee8cb11c474bc63cb8217112c88bc465f7ea7d364736f6c63430007020033";
 pub const HELLO_WORLD_ABI: &str = "942ae0a7";
 pub const HELLO_WORLD_RESULT:&str = "0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000a68656c6c6f576f726c6400000000000000000000000000000000000000000000";

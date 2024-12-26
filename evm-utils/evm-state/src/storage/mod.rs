@@ -353,7 +353,7 @@ impl Storage<OptimisticTransactionDB> {
         let path = path.as_ref();
         let target = target.as_ref();
 
-        // TODO: ensure target dir is empty or doesn't exists at all
+        // TODO(L): assert, ensure target dir is empty or doesn't exists at all
         fs::create_dir_all(target).expect("Unable to create target dir");
 
         assert!(
@@ -514,6 +514,7 @@ impl Storage<OptimisticTransactionDB> {
     }
 
     pub fn merge_from_db(&self, other_db: &Self) -> Result<()> {
+        // TODO(L): make it possible to merge reference counters?
         assert!(!self.gc_enabled, "Cannot merge to db with rc counters");
         assert!(
             !other_db.gc_enabled,
@@ -534,7 +535,6 @@ impl Storage<OptimisticTransactionDB> {
             let (k, v) = item?;
             self.db.put_cf(cf, &k, &v)?
         }
-        // TODO: make it possible to merge reference counters?
         Ok(())
     }
 
@@ -583,8 +583,8 @@ impl Storage<OptimisticTransactionDB> {
     /// Also find all subchain roots.
     /// Return array of root_hashes for which counters == 0 after removing slot.
     pub fn purge_slot(&self, slot: u64) -> Result<Vec<H256>> {
-        // TODO: clever retry on purge slot failure (if transaction conflict).
-        // TODO: also make some retry on RootCleanup manager.
+        // TODO(L): clever retry on purge slot failure (if transaction conflict).
+        // TODO(L): also make some retry on RootCleanup manager.
         if !self.gc_enabled {
             return Ok(vec![]);
         }
@@ -803,7 +803,7 @@ impl Storage<OptimisticTransactionDB> {
                 }
             }
 
-            // TODO: Propagate cleanup to outer level.
+            // TODO(L): Propagate cleanup to outer level.
             RootCleanup::new(self, removed_roots).cleanup()?;
         }
         Ok(())
@@ -826,7 +826,7 @@ impl Storage<OptimisticTransactionDB> {
 
         let mut engine = BackupEngine::open(&opts, &env)?;
         if engine.get_backup_info().len() > HARD_BACKUPS_COUNT {
-            // TODO: measure
+            // TODO(L): measure
             engine.purge_old_backups(HARD_BACKUPS_COUNT)?;
         }
         engine.create_new_backup_flush(self.db.as_ref(), true)?;

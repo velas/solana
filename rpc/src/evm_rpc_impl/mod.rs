@@ -127,10 +127,10 @@ async fn block_to_state_root(
 
     let mut found_block_hash = None;
 
-    // TODO: add logic for block by num
     match block_id {
         BlockId::RelativeId(BlockRelId::Pending) | BlockId::RelativeId(BlockRelId::Latest) => {}
         _ => {
+            //TODO(H): Add support of block_by_num state on subchain
             if !main_chain {
                 return Err(Error::InvalidParams {});
             }
@@ -183,7 +183,7 @@ async fn block_to_state_root(
     };
     Ok(StateRootWithBank {
         state_root: meta
-            .get_evm_block_by_id(chain, block_num) // TODO: don't request full block.
+            .get_evm_block_by_id(chain, block_num) // TODO(L): don't request full block.
             .await
             .filter(|(b, _)| {
                 // if requested specific block hash, check that block with this hash is not in reorged fork
@@ -250,7 +250,7 @@ impl GeneralERPC for GeneralErpcImpl {
     }
 
     fn sha3(&self, _meta: Self::Metadata, bytes: Bytes) -> Result<H256, Error> {
-        // TODO: try `Ok(H256(Keccak256::digest(&bytes.0).try_into().unwrap()))`
+        // TODO(L): try `Ok(H256(Keccak256::digest(&bytes.0).try_into().unwrap()))`
         Ok(H256::from_slice(
             Keccak256::digest(bytes.0.as_slice()).as_slice(),
         ))
@@ -261,7 +261,7 @@ impl GeneralERPC for GeneralErpcImpl {
         Ok(format!("{}", bank.evm().main_chain().id()))
     }
 
-    // TODO: Add network info
+    // TODO(L): Add network info
     fn is_listening(&self, _meta: Self::Metadata) -> Result<bool, Error> {
         Ok(true)
     }
@@ -980,7 +980,7 @@ impl TraceERPC for TraceErpcImpl {
         &self,
         meta: Self::Metadata,
         tx: RPCTransaction,
-        traces: Vec<String>, //TODO: check trace = ["trace"]
+        traces: Vec<String>, //TODO(L): assert trace = ["trace"]
         block: Option<BlockId>,
         meta_info: Option<TraceMeta>,
     ) -> BoxFuture<Result<evm_rpc::trace::TraceResultsWithTransactionHash, Error>> {
@@ -1448,10 +1448,10 @@ fn call_many(
         ..Default::default()
     };
 
-    //TODO: Hashes actual to saved root
+    //TODO(L): Hashes actual to saved root
     // Copy 8kb
     let last_hashes = if let Some(chain_id) = chain {
-        [H256::zero(); 256] // TODO: get from state account
+        [H256::zero(); 256] // TODO(H): get from state account
     } else {
         *bank.evm().main_chain().blockhashes().get_hashes()
     };
@@ -1615,7 +1615,6 @@ async fn block_by_number(
         Some(block_num) => meta.get_evm_block_by_id(chain, block_num).await,
         None => None,
     };
-    // TODO: Inline evm_state lookups, and request only solana headers.
     let (block, confirmed) = match evm_block {
         None => {
             error!(target: "rpc", "Error requesting block:{:?} ({:?}) not found", block, num);
@@ -1687,7 +1686,7 @@ async fn trace_call_many(
     let mut txs = Vec::new();
     let mut txs_meta = Vec::new();
 
-    // TODO: Handle Vec<String> - traces array, check that it contain "trace" string.
+    // TODO(L): Handle Vec<String> - traces array, check that it contain "trace" string.
     for (t, _, meta) in tx_traces {
         let meta = meta.unwrap_or_default();
         let meta_keys = meta

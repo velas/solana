@@ -14,7 +14,7 @@ pub const EVM_INSTRUCTION_BORSH_PREFIX: u8 = 255u8;
 #[derive(
     BorshSerialize,
     BorshDeserialize,
-    // TODO: add schema generation custom command
+    // TODO(L): add schema generation custom command
     // BorshSchema,
     Clone,
     Debug,
@@ -45,7 +45,7 @@ impl FeePayerType {
 #[derive(
     BorshSerialize,
     BorshDeserialize,
-    // TODO: add schema generation custom command
+    // TODO(L): add schema generation custom command
     // BorshSchema,
     Clone,
     Debug,
@@ -69,7 +69,7 @@ pub enum EvmBigTransaction {
 #[derive(
     BorshSerialize,
     BorshDeserialize,
-    // TODO: add schema generation custom command
+    // TODO(L): add schema generation custom command
     // BorshSchema,
     Clone,
     Debug,
@@ -104,7 +104,7 @@ impl ExecuteTransaction {
 #[derive(
     BorshSerialize,
     BorshDeserialize,
-    // TODO: add schema generation custom command
+    // TODO(L): add schema generation custom command
     // BorshSchema,
     Clone,
     Debug,
@@ -168,7 +168,7 @@ pub enum EvmInstruction {
         fee_type: FeePayerType,
     },
 
-    // TODO: polish docs
+    // TODO(H): polish IX docs
     /// account_structure [
     ///     account_key[0] - evm state
     ///     account_key[1] - custom evm state
@@ -269,7 +269,7 @@ impl Default for SubchainConfig {
 #[derive(
     BorshSerialize,
     BorshDeserialize,
-    // TODO: add schema generation custom command
+    // TODO(L): add schema generation custom command
     // BorshSchema,
     Clone,
     Debug,
@@ -388,6 +388,7 @@ impl From<v0::EvmInstruction> for EvmInstruction {
     }
 }
 
+// TODO(L): implement try_{into, from}, why we need From impl.
 impl From<EvmInstruction> for v0::EvmInstruction {
     fn from(i: EvmInstruction) -> Self {
         match i {
@@ -422,7 +423,6 @@ impl From<EvmInstruction> for v0::EvmInstruction {
                 }
             },
             EvmInstruction::EvmSubchain(_) => {
-                // TODO: implement try_{into, from}
                 panic!("EvmSubChain instruction should not be used in v0")
             }
         }
