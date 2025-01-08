@@ -2,7 +2,6 @@ mod listener;
 
 use {
     crate::{from_client_error, send_and_confirm_transactions, EvmBridge, EvmResult},
-    ::tokio::sync::mpsc,
     base64::{engine::general_purpose::STANDARD as BASE64, Engine},
     borsh::BorshSerialize,
     evm_rpc::{error::into_native_error, Bytes, RPCTransaction},
@@ -30,7 +29,7 @@ use {
         sync::{Arc, Mutex},
         time::Duration,
     },
-    tokio::sync::mpsc::error::SendError,
+    tokio::sync::{mpsc::error::SendError, *},
     tracing_attributes::instrument,
     txpool::{
         scoring::Choice, Pool, Readiness, Ready, Scoring, ShouldReplace, VerifiedTransaction,

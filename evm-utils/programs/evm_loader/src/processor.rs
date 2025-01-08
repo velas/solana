@@ -333,7 +333,6 @@ impl EvmProcessor {
             return Err(EvmError::MissingRequiredSignature);
         }
 
-        // TODO(C): Remove swap precompile for subchain.
         fn precompile_set(
             support_precompile: bool,
             evm_new_precompiles: bool,
