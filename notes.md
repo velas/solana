@@ -11,9 +11,9 @@
 9. TODO(L): Replace root/db/bank by root-guard.
 10. TODO(H): Save last hashes list, to perform cleanup if it was recoverable error.
 11. TODO(H): polish IX docs
-13. TODO(H): Add support of block_by_num state on subchain
-14. TODO(H): get from state account
-
+12. TODO(H): Add support of block_by_num state on subchain
+13. TODO(H): get from state account
+14. TODO(L): modify meta only for main chain
 --
 
 1. Reverted transaction processing 

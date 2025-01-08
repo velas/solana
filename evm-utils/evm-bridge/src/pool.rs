@@ -603,6 +603,7 @@ async fn process_tx(
     );
 
     // Shortcut for swap tokens to native, will add solana account to transaction.
+    // TODO(L): modify meta only for main chain
     if let TransactionAction::Call(addr) = tx.action {
         use solana_evm_loader_program::precompiles::*;
 
