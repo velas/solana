@@ -168,12 +168,7 @@ pub enum EvmInstruction {
         fee_type: FeePayerType,
     },
 
-    // TODO(H): polish IX docs
-    /// account_structure [
-    ///     account_key[0] - evm state
-    ///     account_key[1] - custom evm state
-    ///     account_key[2] - signer
-    /// ]
+    /// EVM Subchain management and transaction execution related instructions
     EvmSubchain(EvmSubChain),
 }
 
@@ -286,8 +281,8 @@ pub enum EvmSubChain {
     /// Allocate Data Account for newly created EVM Subchain
     ///
     /// Outer args:
-    ///     account_key[0] - Evm state
-    ///     account_key[1] - Custom evm state
+    ///     account_key[0] - EVM state
+    ///     account_key[1] - Custom EVM state
     ///     account_key[2] - Signer (owner of subchain)
     ///     account_key[3] - pre-seed data account [Optional]
     CreateAccount {
@@ -298,9 +293,9 @@ pub enum EvmSubChain {
     /// Execute EVM Subchain Transaction
     ///
     /// Outer args:
-    ///     account_key[0] - evm state
-    ///     account_key[1] - custom evm state
-    ///     account_key[2] - bridge account
+    ///     account_key[0] - EVM state
+    ///     account_key[1] - Custom EVM state
+    ///     account_key[2] - Bridge account
     ExecuteTransaction {
         chain_id: ChainID,
         tx: ExecuteTransaction,
