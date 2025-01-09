@@ -15,7 +15,7 @@ pub struct Account {
     pub storage: BTreeMap<H256, H256>,
     #[serde(
         deserialize_with = "HexOrNum::deserialize_with",
-        serialize_with = "HexOrNum::seralize_with"
+        serialize_with = "HexOrNum::serialize_with"
     )]
     pub balance: U256,
     #[serde(skip_serializing_if = "is_zero")]
@@ -168,7 +168,7 @@ impl<'de> Deserialize<'de> for ChainID {
 
 pub struct HexOrNum(U256);
 impl HexOrNum {
-    pub fn seralize_with<S: serde::Serializer>(
+    pub fn serialize_with<S: serde::Serializer>(
         val: &U256,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {

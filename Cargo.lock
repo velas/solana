@@ -4060,6 +4060,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
 
 [[package]]
+name = "multizip"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1fe13b118613c2f83085b3d0957ac6c4f1039270d8dd732285a948c280cb95e"
+
+[[package]]
 name = "native-tls"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8591,6 +8597,7 @@ dependencies = [
  "hex-literal 0.2.2",
  "inquire",
  "interactive-clap",
+ "multizip",
  "serde",
  "serde_json",
  "shell-words",

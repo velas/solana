@@ -4,6 +4,7 @@ use {
     genesis_json::ChainID,
     inquire::{validator::Validation, Select},
     interactive_clap::{ResultFromCli, ToCliArgs},
+    multizip::zip3,
     std::{cell::Cell, collections::BTreeMap, error::Error, fmt::Display, str::FromStr},
     strum::{EnumDiscriminants, EnumIter, EnumMessage, IntoEnumIterator},
 };
@@ -119,6 +120,9 @@ impl Config {
     ) -> color_eyre::eyre::Result<Option<MintingAddresses>> {
         let mut addresses = vec![];
         let mut balances = vec![];
+        let mut codes = vec![];
+        // TODO(H): implement storage in allocs
+        // let mut storages: Vec<std::collections::BTreeMap<(), ()>> = vec![];
 
         let mut address: evm_state::H160 =
             match inquire::CustomType::new("Minting address:").prompt() {
@@ -129,8 +133,9 @@ impl Config {
                 ) => return Ok(None),
                 Err(err) => return Err(err.into()),
             };
+
         loop {
-            let balance: u64 = match inquire::CustomType::new("Balance:").prompt() {
+            let balance: U256 = match inquire::CustomType::new("Balance (wei):").prompt() {
                 Ok(value) => value,
                 Err(
                     inquire::error::InquireError::OperationCanceled
@@ -138,8 +143,17 @@ impl Config {
                 ) => break,
                 Err(err) => return Err(err.into()),
             };
+            let code: Bytes = match inquire::CustomType::new("Code (hex):").prompt() {
+                Ok(code) => code,
+                Err(
+                    inquire::error::InquireError::OperationCanceled
+                    | inquire::error::InquireError::OperationInterrupted,
+                ) => return Ok(None),
+                Err(err) => return Err(err.into()),
+            };
             addresses.push(address);
             balances.push(balance);
+            codes.push(code);
             let naddress: Option<_> =
                 match inquire::Text::new("One more minting address (esc to skip):")
                     .with_validator(
@@ -186,6 +200,7 @@ impl Config {
         Ok(Some(MintingAddresses {
             address: addresses,
             balance: balances,
+            code: codes,
         }))
     }
 
@@ -242,20 +257,28 @@ impl Config {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, clap::Parser)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, clap::Parser)]
 pub struct MintingAddresses {
     address: Vec<Address>,
     balance: Vec<Balance>,
+    code: Vec<Bytes>,
+    // TODO(H): implement storage in allocs
+    // storage: Vec<std::collections::BTreeMap<(), ()>>,
 }
 
 impl interactive_clap::ToCliArgs for MintingAddresses {
     fn to_cli_args(&self) -> std::collections::VecDeque<String> {
         let mut args = std::collections::VecDeque::new();
-        for (address, balance) in self.address.iter().zip(self.balance.iter()) {
+        for (address, balance, code) in
+            zip3(self.address.iter(), self.balance.iter(), self.code.iter())
+        {
             args.push_back("--address".to_string());
             args.push_back(balance.to_string());
             args.push_back("--balance".to_string());
             args.push_back(address.to_string());
+            args.push_back("--code".to_string());
+            args.push_back(code.to_string());
+            // TODO(H): implement storage in allocs
         }
 
         args
@@ -266,7 +289,7 @@ impl interactive_clap::ToCli for MintingAddresses {
     type CliVariant = MintingAddresses;
 }
 
-type Balance = u64;
+type Balance = U256;
 type Address = evm_state::Address;
 
 #[derive(Debug, Clone, interactive_clap::InteractiveClap, serde::Serialize, serde::Deserialize)]
@@ -480,18 +503,18 @@ impl TryFrom<CliCmd> for Cmd {
 impl From<Config> for genesis_json::GenesisConfig {
     fn from(config: Config) -> Self {
         let mut alloc = BTreeMap::new();
-        for (addr, balance) in config
-            .minting_addresses
-            .address
-            .iter()
-            .zip(config.minting_addresses.balance.iter())
-        {
+        for (addr, balance, code) in zip3(
+            config.minting_addresses.address.iter(),
+            config.minting_addresses.balance.iter(),
+            config.minting_addresses.code.iter(),
+        ) {
             alloc.insert(
                 *addr,
                 genesis_json::Account {
-                    balance: U256::from(*balance),
+                    balance: *balance,
                     nonce: 0,
-                    code: Bytes::default(),
+                    code: code.clone(),
+                    // TODO(H): implement storage in allocs
                     storage: BTreeMap::new(),
                 },
             );
@@ -521,13 +544,11 @@ fn none_if_empty(val: String) -> Option<String> {
 }
 impl From<genesis_json::GenesisConfig> for CliConfig {
     fn from(config: genesis_json::GenesisConfig) -> Self {
-        let mut minting_addresses = MintingAddresses {
-            address: vec![],
-            balance: vec![],
-        };
+        let mut minting_addresses: MintingAddresses = Default::default();
+
         for (addr, account) in config.alloc.0.iter() {
             minting_addresses.address.push(*addr);
-            minting_addresses.balance.push(account.balance.as_u64());
+            minting_addresses.balance.push(account.balance);
         }
         CliConfig {
             network_name: none_if_empty(config.config.network_name),
