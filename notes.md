@@ -13,6 +13,8 @@
 11. TODO(H): Add support of block_by_num state on subchain
 12. TODO(H): get from state account
 13. TODO(L): modify meta only for main chain
+14. Dymanic minting from contract (precompile 0x000000...)
+15. Check if subchain/mainchain `NATIVE_CONTRACTS` initialization convered with tests
 
 --
 
@@ -24,5 +26,4 @@
 ## Unclassified
 
 Evm Swap Precompile - implement as plain smart contract
-Dymanic minting from contract (precompile 0x000000...)
 Activate `solana_sdk::feature_set::velas::evm_new_precompiles` runtime feature
