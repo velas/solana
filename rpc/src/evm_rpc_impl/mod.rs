@@ -1450,7 +1450,7 @@ fn call_many(
 
     //TODO(L): Hashes actual to saved root
     // Copy 8kb
-    let last_hashes = if let Some(chain_id) = chain {
+    let last_hashes = if let Some(_chain_id) = chain {
         [H256::zero(); 256] // TODO(H): get from state account
     } else {
         *bank.evm().main_chain().blockhashes().get_hashes()

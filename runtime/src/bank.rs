@@ -114,7 +114,7 @@ use {
         fee_calculator::{FeeCalculator, FeeRateGovernor},
         genesis_config::{ClusterType, GenesisConfig},
         hard_forks::HardForks,
-        hash::{extend_and_hash, hashv, Hash, Hasher},
+        hash::{extend_and_hash, hashv, Hash},
         incinerator,
         inflation::Inflation,
         instruction::CompiledInstruction,
@@ -1415,7 +1415,7 @@ impl Bank {
             fee_structure: FeeStructure::default(),
             // ANCHOR - VELAS
             // TODO(L): put evm_state argument into
-            evm: Default::default(),
+            evm: EvmBank::new_with_state(evm_state),
         };
 
         let accounts_data_size_initial = bank.get_total_accounts_stats().unwrap().data_len as u64;

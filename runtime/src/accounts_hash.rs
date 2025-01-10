@@ -715,7 +715,7 @@ impl AccountsHash {
     pub fn rest_of_hash_calculation(
         &self,
         data_sections_by_pubkey: Vec<Vec<Vec<CalculateHashIntermediate>>>,
-        mut stats: &mut HashStats,
+        stats: &mut HashStats,
         is_last_pass: bool,
         mut previous_state: PreviousPass,
         max_bin: usize,

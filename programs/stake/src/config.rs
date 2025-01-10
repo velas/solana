@@ -11,12 +11,12 @@ use {
     solana_sdk::{
         account::{AccountSharedData, ReadableAccount, WritableAccount},
         genesis_config::GenesisConfig,
-        stake::config::{self, Config},
+        stake::config,
     },
 };
 
 pub fn from<T: ReadableAccount>(account: &T) -> Option<Config> {
-        get_config_data(account.data())
+    get_config_data(account.data())
         .ok()
         .and_then(|data| deserialize(data).ok())
 }

@@ -4264,7 +4264,7 @@ impl AccountsDb {
             .fetch_add(scan_storages_elasped.as_us(), Ordering::Relaxed);
 
         let mut purge_accounts_index_elapsed = Measure::start("purge_accounts_index_elapsed");
-        
+
         let reclaims = match scan_result {
             ScanStorageResult::Cached(_) => {
                 panic!("Should not see cached keys in this `else` branch, since we checked this slot did not exist in the cache above");
@@ -5655,7 +5655,7 @@ impl AccountsDb {
             )
             .unwrap(); // unwrap here will never fail since check_hash = false
         let mut bank_hashes = self.bank_hashes.write().unwrap();
-        let mut bank_hash_info = bank_hashes.get_mut(&slot).unwrap();
+        let bank_hash_info = bank_hashes.get_mut(&slot).unwrap();
         bank_hash_info.snapshot_hash = hash;
         (hash, total_lamports)
     }
@@ -5663,7 +5663,7 @@ impl AccountsDb {
     fn scan_snapshot_stores_with_cache(
         cache_hash_data: &CacheHashData,
         storage: &SortedStorages,
-        mut stats: &mut crate::accounts_hash::HashStats,
+        stats: &mut crate::accounts_hash::HashStats,
         bins: usize,
         bin_range: &Range<usize>,
         check_hash: bool,
@@ -7255,7 +7255,7 @@ impl AccountsDb {
         let mut storage_info_local = HashMap::<AppendVecId, StorageSizeAndCount>::default();
         // first collect into a local HashMap with no lock contention
         for (_, v) in accounts_map.iter() {
-            let mut info = storage_info_local
+            let info = storage_info_local
                 .entry(v.store_id)
                 .or_insert_with(StorageSizeAndCount::default);
             info.stored_size += v.stored_account.stored_size;

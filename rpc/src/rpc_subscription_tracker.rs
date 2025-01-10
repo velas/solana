@@ -133,17 +133,11 @@ impl SubscriptionParams {
     }
 
     fn is_evm_blocks_watcher(&self) -> bool {
-        matches!(
-            self,
-            SubscriptionParams::EvmBlockHeader
-        )
+        matches!(self, SubscriptionParams::EvmBlockHeader)
     }
 
     fn is_evm_logs_watcher(&self) -> bool {
-        matches!(
-            self,
-            SubscriptionParams::EvmLogs(_)
-        )
+        matches!(self, SubscriptionParams::EvmLogs(_))
     }
 }
 
@@ -492,14 +486,11 @@ impl SubscriptionsTracker {
                 .insert(info.params.clone(), Arc::clone(&info));
         }
 
-
         if info.params.is_evm_blocks_watcher() {
-            self.evm_blocks_watchers
-                .insert(id, Arc::clone(&info));
+            self.evm_blocks_watchers.insert(id, Arc::clone(&info));
         }
         if info.params.is_evm_logs_watcher() {
-            self.evm_logs_watchers
-                .insert(id, Arc::clone(&info));
+            self.evm_logs_watchers.insert(id, Arc::clone(&info));
         }
     }
 

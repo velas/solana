@@ -15,7 +15,6 @@ use {
         keyed_account::{get_signers, keyed_account_at_index},
         program_utils::limited_deserialize,
         stake::{
-            instruction::StakeInstruction,
             program::id,
             state::{Authorized, Lockup},
         },
