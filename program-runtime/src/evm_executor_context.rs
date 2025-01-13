@@ -3,7 +3,7 @@ use {
         mapref::one::{MappedRef, MappedRefMut, Ref, RefMut},
         DashMap,
     },
-    evm_state::{AccountProvider, EvmBackend, Executor},
+    evm_state::{AccountProvider, EvmBackend, Executor, TEST_CHAIN_ID},
     log::{debug, warn},
     serde::{
         de::{SeqAccess, Visitor},
@@ -136,7 +136,7 @@ impl Clone for EvmChain {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MainChain {
     pub chain_id: ChainID,
     pub evm_state: RwLock<evm_state::EvmState>,
@@ -151,6 +151,17 @@ impl Clone for MainChain {
             evm_state: RwLock::new(self.evm_state.read().unwrap().clone()),
             evm_changed_list: RwLock::new(self.evm_changed_list.read().unwrap().clone()),
             evm_blockhashes: RwLock::new(self.evm_blockhashes.read().unwrap().clone()),
+        }
+    }
+}
+
+impl Default for MainChain {
+    fn default() -> Self {
+        Self {
+            chain_id: TEST_CHAIN_ID,
+            evm_state: RwLock::new(evm_state::EvmState::default()),
+            evm_changed_list: RwLock::new(None),
+            evm_blockhashes: RwLock::new(BlockHashEvm::default()),
         }
     }
 }
@@ -246,6 +257,15 @@ impl EvmBank {
                     )
                 })
                 .collect(),
+        }
+    }
+    pub fn new_with_state(evm_state: evm_state::EvmState) -> Self {
+        Self {
+            main_chain: MainChain {
+                evm_state: RwLock::new(evm_state),
+                ..Default::default()
+            },
+            side_chains: DashMap::new(),
         }
     }
 

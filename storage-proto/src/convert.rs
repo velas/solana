@@ -1085,8 +1085,6 @@ impl TryFrom<tx_by_addr::TransactionByAddr> for Vec<TransactionByAddrInfo> {
     }
 }
 
-pub use crate::convert_evm::*;
-
 #[cfg(test)]
 mod test {
     use {super::*, enum_iterator::IntoEnumIterator};

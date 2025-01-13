@@ -3061,7 +3061,6 @@ pub mod rpc_minimal {
             debug!("get_balance rpc request received: {:?}", pubkey_str);
             let pubkey = verify_pubkey(&pubkey_str)?;
 
-            let commitment = config.as_ref().and_then(|cfg| cfg.commitment);
             let balance_format = config.as_ref().and_then(|cfg| cfg.balance_format);
 
             let rs = meta.get_balance(&pubkey, config.unwrap_or_default())?;
@@ -3414,7 +3413,7 @@ pub mod rpc_bank {
                     }
                 }
 
-                let mut entry = block_production.entry(identity).or_default();
+                let entry = block_production.entry(identity).or_default();
                 if slot_history.check(slot) == solana_sdk::slot_history::Check::Found {
                     entry.1 += 1; // Increment blocks_produced
                 }
