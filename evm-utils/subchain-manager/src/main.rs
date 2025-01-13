@@ -1,4 +1,5 @@
 use {
+    color_eyre::eyre::WrapErr,
     evm_rpc::{Bytes, FormatHex},
     evm_state::U256,
     genesis_json::ChainID,
@@ -50,6 +51,7 @@ pub struct Config {
 
     /// Select a Chain ID (should be unique, and start with 0x56): 0x56_
     #[interactive_clap(skip_default_input_arg)]
+    #[interactive_clap(long)]
     chain_id: ChainID,
 
     /// Hardfork version (default: istanbul):
@@ -120,17 +122,16 @@ impl Config {
         let mut addresses = vec![];
         let mut balances = vec![];
 
-        let mut address: evm_state::H160 =
-            match inquire::CustomType::new("Minting address:").prompt() {
-                Ok(value) => value,
-                Err(
-                    inquire::error::InquireError::OperationCanceled
-                    | inquire::error::InquireError::OperationInterrupted,
-                ) => return Ok(None),
-                Err(err) => return Err(err.into()),
-            };
+        let mut address: Address = match inquire::CustomType::new("Minting address:").prompt() {
+            Ok(value) => value,
+            Err(
+                inquire::error::InquireError::OperationCanceled
+                | inquire::error::InquireError::OperationInterrupted,
+            ) => return Ok(None),
+            Err(err) => return Err(err.into()),
+        };
         loop {
-            let balance: u64 = match inquire::CustomType::new("Balance:").prompt() {
+            let balance: Balance = match inquire::CustomType::new("Balance:").prompt() {
                 Ok(value) => value,
                 Err(
                     inquire::error::InquireError::OperationCanceled
@@ -177,10 +178,10 @@ impl Config {
             if naddress.is_none() {
                 break;
             }
-            let Ok(naddress) = Address::from_hex(&naddress.unwrap()) else {
+            let Ok(naddress) = evm_state::Address::from_hex(&naddress.unwrap()) else {
                 break;
             };
-            address = naddress;
+            address = Address(naddress);
         }
 
         Ok(Some(MintingAddresses {
@@ -253,9 +254,9 @@ impl interactive_clap::ToCliArgs for MintingAddresses {
         let mut args = std::collections::VecDeque::new();
         for (address, balance) in self.address.iter().zip(self.balance.iter()) {
             args.push_back("--address".to_string());
-            args.push_back(balance.to_string());
-            args.push_back("--balance".to_string());
             args.push_back(address.to_string());
+            args.push_back("--balance".to_string());
+            args.push_back(balance.to_string());
         }
 
         args
@@ -266,9 +267,64 @@ impl interactive_clap::ToCli for MintingAddresses {
     type CliVariant = MintingAddresses;
 }
 
-type Balance = u64;
-type Address = evm_state::Address;
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct Balance(evm_state::U256);
 
+impl Display for Balance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (eth, weis) = self.0.div_mod(U256::exp10(18));
+        if weis == U256::zero() {
+            write!(f, "{}", eth)
+        } else {
+            // Show decimal part, with prepending zeros,
+            // but without trailing zeros
+
+            let weis_str = format!("{:0>18}", weis);
+            let weis_str = weis_str.trim_end_matches('0');
+            write!(f, "{}.{}", eth, weis_str)
+        }
+    }
+}
+impl FromStr for Balance {
+    type Err = Box<dyn Error + Send + Sync>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (eth, weis) = if let Some((eth, weis_str)) = s.split_once('.') {
+            let eth = evm_state::U256::from_dec_str(eth)?;
+            // parse decimal part, but with padding
+
+            if weis_str.contains(|c: char| !c.is_digit(10)) {
+                return Err("Invalid characters in decimal part".into());
+            }
+            let weis = evm_state::U256::from_dec_str(weis_str)? * U256::exp10(18 - weis_str.len());
+
+            (eth, weis)
+        } else {
+            let eth = evm_state::U256::from_dec_str(s)?;
+            (eth, evm_state::U256::zero())
+        };
+        let balance = eth * U256::exp10(18) + weis;
+        Ok(Balance(balance))
+    }
+}
+
+// type Address = evm_state::Address;
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct Address(evm_state::Address);
+impl Display for Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+impl FromStr for Address {
+    type Err = <evm_state::Address as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let address = evm_state::Address::from_str(s)?;
+        Ok(Address(address))
+    }
+}
 #[derive(Debug, Clone, interactive_clap::InteractiveClap, serde::Serialize, serde::Deserialize)]
 pub struct DeployConfig {
     /// Path to config file:
@@ -408,9 +464,8 @@ pub enum SubCommand {
     /// Generate a config for new subchain and store it into file.
     #[strum_discriminants(strum(message = "Generate a new config"))]
     GenerateConfig(Config),
-
     /// Use 'geth init' genesis and add needed fields.
-    #[strum_discriminants(strum(message = "Use 'geth init' genesis and add needed fields"))]
+    #[strum_discriminants(strum(message = "Generate config using geth genesis.json"))]
     ImportGetGenesis(OnlyFile),
     /// Deploy a new subchain using config file.
     #[strum_discriminants(strum(message = "Create and deploy new subchain from config"))]
@@ -435,10 +490,10 @@ impl interactive_clap::ToCli for ChainID {
 }
 
 impl TryFrom<CliCmd> for Cmd {
-    type Error = Box<dyn Error>;
+    type Error = Box<dyn Error + Send + Sync>;
     fn try_from(value: CliCmd) -> Result<Self, Self::Error> {
         let Some(subcommand) = value.subcommand else {
-            return Err("No subcommand provided".into());
+            return Err("Command was not choosen".into());
         };
 
         let subcommand = match subcommand {
@@ -451,8 +506,8 @@ impl TryFrom<CliCmd> for Cmd {
                 minting_addresses: config
                     .minting_addresses
                     .ok_or("No minting addresses provided")?,
-                token_symbol: config.token_symbol.ok_or("No token symbol provided")?,
-                rpc_url: config.rpc_url.ok_or("No RPC URL provided")?,
+                token_symbol: config.token_symbol.unwrap_or_default(),
+                rpc_url: config.rpc_url.unwrap_or_default(),
             }),
             CliSubCommand::ImportGetGenesis(file_config) => {
                 SubCommand::ImportGetGenesis(OnlyFile {
@@ -487,9 +542,9 @@ impl From<Config> for genesis_json::GenesisConfig {
             .zip(config.minting_addresses.balance.iter())
         {
             alloc.insert(
-                *addr,
+                addr.0,
                 genesis_json::Account {
-                    balance: U256::from(*balance),
+                    balance: balance.0,
                     nonce: 0,
                     code: Bytes::default(),
                     storage: BTreeMap::new(),
@@ -526,8 +581,8 @@ impl From<genesis_json::GenesisConfig> for CliConfig {
             balance: vec![],
         };
         for (addr, account) in config.alloc.0.iter() {
-            minting_addresses.address.push(*addr);
-            minting_addresses.balance.push(account.balance.as_u64());
+            minting_addresses.address.push(Address(*addr));
+            minting_addresses.balance.push(Balance(account.balance));
         }
         CliConfig {
             network_name: none_if_empty(config.config.network_name),
@@ -544,6 +599,7 @@ impl From<genesis_json::GenesisConfig> for CliConfig {
 
 fn main() -> color_eyre::Result<()> {
     let cmd = Cmd::try_parse().ok();
+    println!("Debug: {:?}", cmd);
     let context = (); // default: input_context = ()
     let cmd = loop {
         let cmd = <Cmd as interactive_clap::FromCli>::from_cli(cmd.clone(), context);
@@ -561,18 +617,18 @@ fn main() -> color_eyre::Result<()> {
             }
             ResultFromCli::Err(optional_cli_mode, err) => {
                 if let Some(cli_mode) = optional_cli_mode {
-                    println!("Your console command:  {:?}", cli_mode);
+                    println!("Some errors in parsing arguments {:?}", cli_mode);
                 }
                 return Err(err);
             }
         }
     };
-    println!(
-        "Your console command: {}",
-        shell_words::join(&cmd.to_cli_args())
-    );
-    let cmd: Cmd = cmd.try_into().unwrap();
+    let shell = shell_words::join(&cmd.to_cli_args());
+    let cmd: Cmd = cmd
+        .try_into()
+        .map_err(|e| color_eyre::eyre::format_err!("Failed to parse cmd arguments: {}", e))?;
 
+    println!("Your console command: subchain-manager {}", shell);
     match cmd.subcommand {
         SubCommand::GenerateConfig(config) => {
             let path = config.config_path.clone();
