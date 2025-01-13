@@ -493,7 +493,7 @@ impl TryFrom<CliCmd> for Cmd {
     type Error = Box<dyn Error + Send + Sync>;
     fn try_from(value: CliCmd) -> Result<Self, Self::Error> {
         let Some(subcommand) = value.subcommand else {
-            return Err("Command was not choosen".into());
+            return Err("Command was not chosen".into());
         };
 
         let subcommand = match subcommand {
