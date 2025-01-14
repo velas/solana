@@ -10,7 +10,12 @@ use {
     rlp::{Decodable, DecoderError, Encodable, Rlp, RlpStream},
     serde::{Deserialize, Serialize},
     sha3::{Digest, Keccak256},
-    std::convert::TryFrom,
+    std::{
+        convert::{TryFrom, TryInto},
+        error::Error,
+        fmt::Display,
+        str::FromStr,
+    },
     triedb::empty_trie_hash,
 };
 pub use {
@@ -130,7 +135,7 @@ impl Code {
     }
 
     pub fn hash(&self) -> H256 {
-        H256::from_slice(Keccak256::digest(self.0.as_slice()).as_slice())
+        H256(Keccak256::digest(self.0.as_slice()).try_into().unwrap())
     }
 }
 
@@ -143,6 +148,44 @@ impl Encodable for Code {
 impl Decodable for Code {
     fn decode(rlp: &Rlp) -> Result<Self, DecoderError> {
         <_>::decode(rlp).map(Self)
+    }
+}
+
+impl Display for Code {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x")?;
+
+        for b in self.0.iter() {
+            write!(f, "{:02x}", b)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl FromStr for Code {
+    type Err = Box<dyn Error + Send + Sync>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+
+        if s.len() % 2 != 0 {
+            return Err("Invalid Code length: should be a multiple of 2".into());
+        }
+
+        if !s.starts_with("0x") {
+            return Err("Code should start with 0x".into());
+        }
+
+        let s = &s[2..];
+
+        let mut code = Vec::with_capacity(s.len() / 2);
+
+        for i in (0..s.len()).step_by(2) {
+            code.push(u8::from_str_radix(&s[i..i + 2], 16)?);
+        }
+
+        return Ok(code.into());
     }
 }
 
@@ -781,6 +824,16 @@ mod tests {
                 Some(H256::repeat_byte(10)),
                 None
             ]
+        );
+    }
+
+    #[test]
+    fn test_code_to_string_conversions() {
+        assert_eq!(Code(vec![10, 255, 16, 32]).to_string(), "0x0aff1020");
+
+        assert_eq!(
+            Code::from_str("0x0aff1020").unwrap(),
+            Code(vec![10, 255, 16, 32])
         );
     }
 

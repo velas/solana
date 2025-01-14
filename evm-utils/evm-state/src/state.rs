@@ -689,7 +689,7 @@ impl EvmState {
                         "Found non-empty evm state, committing block = {}.",
                         incomming.state.block_number
                     );
-                    let native_blockhash = H256::from_slice(&last_native_blockhash);
+                    let native_blockhash = H256(last_native_blockhash);
                     let changes = incomming.state.state_updates.clone();
                     let committed = incomming.take().commit_block(slot, native_blockhash);
                     let last_hash = committed.state.block.hash();

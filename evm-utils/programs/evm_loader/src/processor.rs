@@ -865,6 +865,7 @@ impl EvmProcessor {
         Ok(())
     }
 
+    // hangle EVM logs
     pub fn handle_subchain_transaction_result(
         &self,
         executor: &mut Executor,
@@ -878,6 +879,14 @@ impl EvmProcessor {
             ic_msg!(invoke_context, "Transaction execution error: {}", e);
             EvmError::InternalExecutorError
         })?;
+
+        let receipt = executor.get_tx_receipt_by_hash(result.tx_id);
+
+        if let Some(receipt) = receipt {
+            debug!("logs = {:?}", receipt.logs);
+        } else {
+            debug!("logs are empty");
+        }
 
         write!(
             crate::solana_extension::MultilineLogger::new(invoke_context.get_log_collector()),
@@ -924,6 +933,7 @@ impl EvmProcessor {
         // if subchain - skip all logic related to fee refund and native swap.
         return Ok(());
     }
+
     // Handle executor errors.
     // refund fee
     pub fn handle_transaction_result(

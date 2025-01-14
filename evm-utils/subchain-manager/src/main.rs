@@ -1,10 +1,10 @@
 use {
-    color_eyre::eyre::WrapErr,
     evm_rpc::{Bytes, FormatHex},
     evm_state::{BURN_GAS_PRICE_IN_SUBCHAIN, U256},
     genesis_json::ChainID,
     inquire::{validator::Validation, Select},
     interactive_clap::{ResultFromCli, ToCliArgs},
+    multizip::zip3,
     std::{cell::Cell, collections::BTreeMap, error::Error, fmt::Display, str::FromStr},
     strum::{EnumDiscriminants, EnumIter, EnumMessage, IntoEnumIterator},
 };
@@ -121,6 +121,7 @@ impl Config {
     ) -> color_eyre::eyre::Result<Option<MintingAddresses>> {
         let mut addresses = vec![];
         let mut balances = vec![];
+        let mut codes = vec![];
 
         let mut address: Address = match inquire::CustomType::new("Minting address:").prompt() {
             Ok(value) => value,
@@ -131,7 +132,7 @@ impl Config {
             Err(err) => return Err(err.into()),
         };
         loop {
-            let balance: Balance = match inquire::CustomType::new("Balance:").prompt() {
+            let balance: Balance = match inquire::CustomType::new("Balance (in Eth):").prompt() {
                 Ok(value) => value,
                 Err(
                     inquire::error::InquireError::OperationCanceled
@@ -139,8 +140,20 @@ impl Config {
                 ) => break,
                 Err(err) => return Err(err.into()),
             };
+
+            let code: Code = match inquire::CustomType::new("Compiled bytecode:").prompt() {
+                Ok(value) => value,
+                Err(
+                    inquire::error::InquireError::OperationCanceled
+                    | inquire::error::InquireError::OperationInterrupted,
+                ) => break,
+                Err(err) => return Err(err.into()),
+            };
+
             addresses.push(address);
             balances.push(balance);
+            codes.push(code);
+
             let naddress: Option<_> =
                 match inquire::Text::new("One more minting address (esc to skip):")
                     .with_validator(
@@ -187,6 +200,7 @@ impl Config {
         Ok(Some(MintingAddresses {
             address: addresses,
             balance: balances,
+            code: codes,
         }))
     }
 
@@ -243,20 +257,25 @@ impl Config {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, clap::Parser)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, clap::Parser)]
 pub struct MintingAddresses {
     address: Vec<Address>,
     balance: Vec<Balance>,
+    code: Vec<Code>,
 }
 
 impl interactive_clap::ToCliArgs for MintingAddresses {
     fn to_cli_args(&self) -> std::collections::VecDeque<String> {
         let mut args = std::collections::VecDeque::new();
-        for (address, balance) in self.address.iter().zip(self.balance.iter()) {
+        for (address, balance, code) in
+            zip3(self.address.iter(), self.balance.iter(), self.code.iter())
+        {
             args.push_back("--address".to_string());
             args.push_back(address.to_string());
             args.push_back("--balance".to_string());
             args.push_back(balance.to_string());
+            args.push_back("--code".to_string());
+            args.push_back(code.to_string());
         }
 
         args
@@ -285,6 +304,7 @@ impl Display for Balance {
         }
     }
 }
+
 impl FromStr for Balance {
     type Err = Box<dyn Error + Send + Sync>;
 
@@ -308,8 +328,6 @@ impl FromStr for Balance {
     }
 }
 
-// type Address = evm_state::Address;
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct Address(evm_state::Address);
 impl Display for Address {
@@ -327,15 +345,15 @@ impl FromStr for Address {
 }
 #[derive(Debug, Clone, interactive_clap::InteractiveClap, serde::Serialize, serde::Deserialize)]
 pub struct DeployConfig {
-    /// Path to config file:
+    /// Path to Config file:
     #[interactive_clap(long)]
     config_file: String,
 
-    /// Velas rpc url:
+    /// Velas RPC URL:
     #[interactive_clap(long)]
     velas_rpc: String,
 
-    /// Path to keypair:
+    /// Path to Keypair file:
     #[interactive_clap(long)]
     #[interactive_clap(skip_default_input_arg)]
     keypair_path: String,
@@ -578,10 +596,7 @@ fn none_if_empty(val: String) -> Option<String> {
 }
 impl From<genesis_json::GenesisConfig> for CliConfig {
     fn from(config: genesis_json::GenesisConfig) -> Self {
-        let mut minting_addresses = MintingAddresses {
-            address: vec![],
-            balance: vec![],
-        };
+        let mut minting_addresses = MintingAddresses::default();
         for (addr, account) in config.alloc.0.iter() {
             minting_addresses.address.push(Address(*addr));
             minting_addresses.balance.push(Balance(account.balance));

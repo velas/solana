@@ -9,13 +9,13 @@ edition = "2021"
 inquire = "0.7.5"
 interactive-clap = "0.2.10"
 clap = { version = "4.0.18", features = ["derive"] }
+multizip = "0.1.0"
 shell-words = "1.1.0"
 
 color-eyre = "0.6"
 strum = { version = "0.24", features = ["derive"] }
 strum_macros = "0.24"
 serde = { version = "1.0", features = ["derive"] }
-
 
 solana-evm-loader-program = { path = "../programs/evm_loader" }
 solana-sdk = { path = "../../sdk", version = "1.9.13" }
