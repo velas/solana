@@ -176,29 +176,37 @@ fn patch_subchain_call(meta: Arc<EvmBridge>, call: Call) -> Option<Call> {
 
             if meta.subchain {
                 let mut params = match method_call.params {
-                    Params::Array(params) => params,
-                    Params::None => vec![],
+                    Params::Array(params) => Value::Array(params),
+                    Params::None => Value::Array(vec![]),
                     _ => {
                         log::warn!("Invalid params type for method call: {:?}", method_call);
                         return None;
                     }
                 };
-                log::debug!("params: {:?}", params);
+                log::debug!("method: {} , params: {}", &method_call.method, params);
                 if let Some(method) = subchain_methods_collector::ETH_METHODS
                     .get(&method_call.method)
                     .clone()
                 {
                     method_call.method = method.clone();
                     // params as array insert at index 0
-                    params = Some(Value::Number(meta.evm_chain_id.into()))
-                        .into_iter()
-                        .chain(params.into_iter())
-                        .collect();
+                    params
+                        .as_array_mut()
+                        .unwrap()
+                        .insert(0, meta.evm_chain_id.into());
                 } else {
                     log::warn!("Method not found in subchain: {:?}", method_call.method);
                     return None;
                 }
-                method_call.params = Params::Array(params);
+
+                method_call.params = match params {
+                    Value::Array(a) => Params::Array(a),
+                    other => {
+                        log::error!("params type should be array: {}", other);
+                        return None;
+                    }
+                };
+
                 log::trace!("Patched method call: {:?}", method_call);
             }
             Call::MethodCall(method_call)

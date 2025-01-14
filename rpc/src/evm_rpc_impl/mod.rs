@@ -1442,9 +1442,10 @@ fn call_many(
             })?
     };
 
+    let chain_id = chain.unwrap_or_else(|| bank.evm().main_chain().id());
     let estimate_config = evm_state::EvmConfig {
         estimate,
-        chain_id: bank.evm().main_chain().id(),
+        chain_id,
         ..Default::default()
     };
 
@@ -1526,6 +1527,7 @@ fn call_inner(
             })
             .collect();
 
+        // check if subchain?
         // Shortcut for swap tokens to native, will add solana account to transaction.
         if address == *ETH_TO_VLX_ADDR {
             debug!("Found transferToNative transaction");
