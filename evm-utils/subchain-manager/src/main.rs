@@ -714,24 +714,28 @@ fn main() -> color_eyre::Result<()> {
             println!("Make sure to review it before deployment.");
         }
         SubCommand::CreateAndDeploy(file_config) => {
-            println!("Loading config from file {}", file_config.config_file);
+            println!("Loading Config from file {}", file_config.config_file);
             let genesis_config = genesis_json::GenesisConfig::load(&file_config.config_file)?;
-            println!("Loading keypair from file {}", file_config.keypair_path);
+            println!("Loading Keypair from file {}", file_config.keypair_path);
             let keypair = solana_sdk::signer::keypair::read_keypair_file(&file_config.keypair_path)
                 .map_err(|e| {
                     color_eyre::eyre::Error::msg(format!("Cannot read keypair file: {}", e))
                 })?;
 
-            println!("Connecting to rpc {}", file_config.velas_rpc);
+            println!("Connecting to RPC {}", file_config.velas_rpc);
             let client = solana_client::rpc_client::RpcClient::new(file_config.velas_rpc);
-            println!("Checking rpc connection");
+            println!("Checking RPC connection");
             client.get_slot()?;
-            println!("Deploying subchain account...");
+            println!("Deploying Subchain State Account...");
             genesis_config.deploy(keypair, &client, false)?;
             let program_key = solana_evm_loader_program::evm_state_subchain_account(
                 genesis_config.config.chain_id.into(),
             );
-            println!("Deployment successful, subchain address={}", program_key);
+            println!(
+                "Deployment successful, Subchain State Account: {}",
+                program_key
+            );
+            println!("Fund Subchain State Account to cover Subchain transaction fees");
         }
     }
     Ok(())
