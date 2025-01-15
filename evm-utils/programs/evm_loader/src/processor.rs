@@ -379,20 +379,21 @@ impl EvmProcessor {
                 else {
                     ic_msg!(
                         invoke_context,
-                        "Fee payer don't have min_deposit {}",
-                        min_deposit
+                        "Fee payer {} don't have min_deposit {}",
+                        fee_payer.unsigned_key(),
+                        min_lamports
                     );
                     return Err(EvmError::NativeAccountInsufficientFunds);
                 };
-
-                if amount < max_fee_in_lamports {
-                    if is_subchain {
-                        ic_msg!(invoke_context, "Fee payer has not enough lamports to pay fee, max_fee: {}, min_deposit: {}, amount: {}", max_fee_in_lamports, min_deposit, amount);
+                if amount < max_fee_in_lamports.0 {
+                    if subchain {
+                        ic_msg!(invoke_context, "Fee payer {} has not enough lamports to pay fee, max_fee:{}, min_deposit:{}, amount:{},", fee_payer.unsigned_key(), max_fee_in_lamports.0, min_lamports, amount);
                     } else {
                         ic_msg!(
                             invoke_context,
-                            "Fee payer has not enough lamports to pay fee, max_fee: {}, amount: {}",
-                            max_fee_in_lamports,
+                            "Fee payer {} has not enough lamports to pay fee, max_fee:{}, amount:{},",
+                            fee_payer.unsigned_key(),
+                            max_fee_in_lamports.0,
                             amount
                         );
                     }
@@ -879,13 +880,18 @@ impl EvmProcessor {
             ic_msg!(invoke_context, "Transaction execution error: {}", e);
             EvmError::InternalExecutorError
         })?;
-
         let receipt = executor.get_tx_receipt_by_hash(result.tx_id);
 
         if let Some(receipt) = receipt {
-            debug!("logs = {:?}", receipt.logs);
-        } else {
-            debug!("logs are empty");
+            for log in receipt.logs.iter() {
+                const MINT_BURN_CONTRACT: H160 = H160::repeat_byte(0);
+                // check receipt.status?
+                if log.address == MINT_BURN_CONTRACT {
+                    debug!("mint-burn contract called");
+                    debug!("topics: {:?}", log.topics);
+                    debug!("data: {:?}", log.data);
+                }
+            }
         }
 
         write!(

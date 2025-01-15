@@ -183,19 +183,17 @@ fn patch_subchain_call(meta: Arc<EvmBridge>, call: Call) -> Option<Call> {
                         return None;
                     }
                 };
-                log::debug!("method: {} , params: {}", &method_call.method, params);
+                log::debug!("method: {}, params: {}", &method_call.method, params);
                 if let Some(method) = subchain_methods_collector::ETH_METHODS
                     .get(&method_call.method)
                     .clone()
                 {
                     method_call.method = method.clone();
-                    // params as array insert at index 0
                     params
                         .as_array_mut()
-                        .unwrap()
-                        .insert(0, meta.evm_chain_id.into());
+                        .map(|params| params.insert(0, meta.evm_chain_id.into()));
                 } else {
-                    log::warn!("Method not found in subchain: {:?}", method_call.method);
+                    log::warn!("method not found in subchain: {:?}", method_call.method);
                     return None;
                 }
 
@@ -207,7 +205,7 @@ fn patch_subchain_call(meta: Arc<EvmBridge>, call: Call) -> Option<Call> {
                     }
                 };
 
-                log::trace!("Patched method call: {:?}", method_call);
+                log::trace!("patched method call: {:?}", method_call);
             }
             Call::MethodCall(method_call)
         }

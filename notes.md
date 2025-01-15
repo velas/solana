@@ -14,6 +14,7 @@
     b. Make sure precompile section is covered with tests
 12. TODO(H): Add support of block_by_num state on subchain
 13. TODO(H): get from state account
+14. TODO:(L): activate updated precompiles through a runtime feature
 
 --
 

@@ -349,7 +349,7 @@ impl Executor {
         let (exit_reason, exit_data) = match action {
             TransactionAction::Call(addr) => {
                 debug!(
-                    "TransactionAction::Call caller  = {}, to = {}.",
+                    "TransactionAction::Call caller = {:?}, to = {:?}.",
                     caller, addr
                 );
                 executor.transact_call(caller, addr, value, input, gas_limit.as_u64(), vec![])
@@ -357,7 +357,7 @@ impl Executor {
             TransactionAction::Create => {
                 let addr = TransactionAction::Create.address(caller, nonce);
                 debug!(
-                    "TransactionAction::Create caller  = {}, to = {:?}.",
+                    "TransactionAction::Create caller = {:?}, to = {:?}.",
                     caller, addr
                 );
                 executor.transact_create(caller, value, input, gas_limit.as_u64(), vec![])

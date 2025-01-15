@@ -1588,7 +1588,7 @@ fn call_inner(
             tx_hash,
             true,
             simulation_entrypoint(
-                PrecompileSet::VelasClassic, // FIXME: encapsulate under feature activation
+                PrecompileSet::VelasClassic, // TODO:(L): activate updated precompiles through a runtime feature
                 &evm_keyed_account,
                 &user_accounts,
                 chain.is_some(),
