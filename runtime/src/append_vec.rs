@@ -45,26 +45,28 @@ pub type StoredMetaWriteVersion = u64;
 /// This struct will be backed by mmaped and snapshotted data files.
 /// So the data layout must be stable and consistent across the entire cluster!
 #[derive(Clone, PartialEq, Debug)]
+#[repr(C)]
 pub struct StoredMeta {
     /// global write version
     pub write_version: StoredMetaWriteVersion,
     /// key for the account
-    pub pubkey: Pubkey,
     pub data_len: u64,
+    pub pubkey: Pubkey,
 }
 
 /// This struct will be backed by mmaped and snapshotted data files.
 /// So the data layout must be stable and consistent across the entire cluster!
 #[derive(Serialize, Deserialize, Clone, Debug, Default, Eq, PartialEq)]
+#[repr(C)]
 pub struct AccountMeta {
     /// lamports in the account
     pub lamports: u64,
+    /// the epoch at which this account will next owe rent
+    pub rent_epoch: Epoch,
     /// the program that owns this account. If executable, the program that loads this account.
     pub owner: Pubkey,
     /// this account's data contains a loaded program (and is now read-only)
     pub executable: bool,
-    /// the epoch at which this account will next owe rent
-    pub rent_epoch: Epoch,
 }
 
 impl<'a, T: ReadableAccount> From<&'a T> for AccountMeta {
@@ -587,6 +589,7 @@ pub mod tests {
     use {
         super::{test_utils::*, *},
         assert_matches::assert_matches,
+        memoffset::offset_of,
         rand::{thread_rng, Rng},
         solana_sdk::{account::WritableAccount, timing::duration_as_ms},
         std::time::Instant,
@@ -923,5 +926,19 @@ pub mod tests {
         drop(av);
         let result = AppendVec::new_from_file(path, accounts_len);
         assert_matches!(result, Err(ref message) if message.to_string() == *"incorrect layout/length/data");
+    }
+
+    #[test]
+    fn test_type_layout() {
+        assert_eq!(offset_of!(StoredMeta, write_version), 0x00);
+        assert_eq!(offset_of!(StoredMeta, data_len), 0x08);
+        assert_eq!(offset_of!(StoredMeta, pubkey), 0x10);
+        assert_eq!(mem::size_of::<StoredMeta>(), 0x30);
+
+        assert_eq!(offset_of!(AccountMeta, lamports), 0x00);
+        assert_eq!(offset_of!(AccountMeta, rent_epoch), 0x08);
+        assert_eq!(offset_of!(AccountMeta, owner), 0x10);
+        assert_eq!(offset_of!(AccountMeta, executable), 0x30);
+        assert_eq!(mem::size_of::<AccountMeta>(), 0x38);
     }
 }
