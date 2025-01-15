@@ -882,14 +882,21 @@ impl EvmProcessor {
         })?;
         let receipt = executor.get_tx_receipt_by_hash(result.tx_id);
 
-        if let Some(receipt) = receipt {
+        if let Some(receipt) = receipt.cloned() {
             for log in receipt.logs.iter() {
                 const MINT_BURN_CONTRACT: H160 = H160::repeat_byte(0);
                 // check receipt.status?
                 if log.address == MINT_BURN_CONTRACT {
+                    let from = H160::from_slice(&log.topics.get(1).unwrap().as_fixed_bytes()[12..]);
+                    let to = H160::from_slice(&log.topics.get(2).unwrap().as_fixed_bytes()[12..]);
+                    let value = U256::from(log.data.as_slice());
                     debug!("mint-burn contract called");
-                    debug!("topics: {:?}", log.topics);
-                    debug!("data: {:?}", log.data);
+                    debug!("from: {:?}", from);
+                    debug!("to: {:?}", to);
+                    debug!("value: {}", value);
+
+                    ic_msg!(invoke_context, "Minting {} wei to {:?}", value, to);
+                    executor.deposit(to, value);
                 }
             }
         }
