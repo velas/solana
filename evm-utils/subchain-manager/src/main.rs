@@ -4,7 +4,6 @@ use {
     genesis_json::ChainID,
     inquire::{validator::Validation, Select},
     interactive_clap::{ResultFromCli, ToCliArgs},
-    multizip::zip3,
     std::{cell::Cell, collections::BTreeMap, error::Error, fmt::Display, str::FromStr},
     strum::{EnumDiscriminants, EnumIter, EnumMessage, IntoEnumIterator},
 };
@@ -121,7 +120,6 @@ impl Config {
     ) -> color_eyre::eyre::Result<Option<MintingAddresses>> {
         let mut addresses = vec![];
         let mut balances = vec![];
-        let mut codes = vec![];
 
         let mut address: Address = match inquire::CustomType::new("Minting address:").prompt() {
             Ok(value) => value,
@@ -141,18 +139,8 @@ impl Config {
                 Err(err) => return Err(err.into()),
             };
 
-            let code: Code = match inquire::CustomType::new("Compiled bytecode:").prompt() {
-                Ok(value) => value,
-                Err(
-                    inquire::error::InquireError::OperationCanceled
-                    | inquire::error::InquireError::OperationInterrupted,
-                ) => break,
-                Err(err) => return Err(err.into()),
-            };
-
             addresses.push(address);
             balances.push(balance);
-            codes.push(code);
 
             let naddress: Option<_> =
                 match inquire::Text::new("One more minting address (esc to skip):")
@@ -200,7 +188,6 @@ impl Config {
         Ok(Some(MintingAddresses {
             address: addresses,
             balance: balances,
-            code: codes,
         }))
     }
 
@@ -245,7 +232,6 @@ impl Config {
             ) => Ok(None),
             Err(err) => Err(err.into()),
         }
-        // }
     }
 
     fn input_hardfork(_context: &InputContext) -> color_eyre::eyre::Result<Option<Hardfork>> {
@@ -261,21 +247,16 @@ impl Config {
 pub struct MintingAddresses {
     address: Vec<Address>,
     balance: Vec<Balance>,
-    code: Vec<Code>,
 }
 
 impl interactive_clap::ToCliArgs for MintingAddresses {
     fn to_cli_args(&self) -> std::collections::VecDeque<String> {
         let mut args = std::collections::VecDeque::new();
-        for (address, balance, code) in
-            zip3(self.address.iter(), self.balance.iter(), self.code.iter())
-        {
+        for (address, balance) in self.address.iter().zip(self.balance.iter()) {
             args.push_back("--address".to_string());
             args.push_back(address.to_string());
             args.push_back("--balance".to_string());
             args.push_back(balance.to_string());
-            args.push_back("--code".to_string());
-            args.push_back(code.to_string());
         }
 
         args

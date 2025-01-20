@@ -13,7 +13,7 @@ use {
     },
     borsh::BorshDeserialize,
     evm::{wei_to_lamports, Executor, ExitReason},
-    evm_state::{ExecutionResult, MemoryAccount, H160, U256},
+    evm_state::{ExecutionResult, MemoryAccount, TransactionReceipt, H160, H256, U256},
     log::*,
     serde::de::DeserializeOwned,
     solana_program_runtime::{
@@ -29,7 +29,7 @@ use {
         program_utils::limited_deserialize,
         system_instruction,
     },
-    std::{cell::RefMut, fmt::Write, ops::DerefMut},
+    std::{cell::RefMut, fmt::Write, ops::DerefMut, sync::OnceLock},
 };
 
 pub const BURN_ADDR: evm_state::H160 = evm_state::H160::zero();
@@ -883,21 +883,8 @@ impl EvmProcessor {
         let receipt = executor.get_tx_receipt_by_hash(result.tx_id);
 
         if let Some(receipt) = receipt.cloned() {
-            for log in receipt.logs.iter() {
-                const MINT_BURN_CONTRACT: H160 = H160::repeat_byte(0);
-                // check receipt.status?
-                if log.address == MINT_BURN_CONTRACT {
-                    let from = H160::from_slice(&log.topics.get(1).unwrap().as_fixed_bytes()[12..]);
-                    let to = H160::from_slice(&log.topics.get(2).unwrap().as_fixed_bytes()[12..]);
-                    let value = U256::from(log.data.as_slice());
-                    debug!("mint-burn contract called");
-                    debug!("from: {:?}", from);
-                    debug!("to: {:?}", to);
-                    debug!("value: {}", value);
-
-                    ic_msg!(invoke_context, "Minting {} wei to {:?}", value, to);
-                    executor.deposit(to, value);
-                }
+            if receipt.status.is_succeed() {
+                Self::mint_burn_eth_in_subchain(executor, invoke_context, receipt)?;
             }
         }
 
@@ -1292,6 +1279,109 @@ impl EvmProcessor {
 
         let users = &keyed_accounts[(first_keyed_account + 1)..];
         Ok(AccountStructure::new(first, users))
+    }
+
+    fn mint_burn_eth_in_subchain(
+        executor: &mut Executor,
+        invoke_context: &InvokeContext,
+        receipt: TransactionReceipt,
+    ) -> Result<(), EvmError> {
+        const MINT_BURN_CONTRACT: H160 = H160::zero();
+
+        fn transfer_event() -> &'static H256 {
+            static TRANSFER_EVENT: OnceLock<H256> = OnceLock::new();
+
+            TRANSFER_EVENT.get_or_init(|| {
+                ethabi::Event {
+                    name: "Transfer".into(),
+                    inputs: vec![
+                        ethabi::EventParam {
+                            name: "from".into(),
+                            kind: ethabi::ParamType::Address,
+                            indexed: true,
+                        },
+                        ethabi::EventParam {
+                            name: "to".into(),
+                            kind: ethabi::ParamType::Address,
+                            indexed: true,
+                        },
+                        ethabi::EventParam {
+                            name: "value".into(),
+                            kind: ethabi::ParamType::Uint(256),
+                            indexed: false,
+                        },
+                    ],
+                    anonymous: false,
+                }
+                .signature()
+            })
+        }
+
+        for log in receipt.logs.iter() {
+            if log.address == MINT_BURN_CONTRACT {
+                let event_hash = log
+                    .topics
+                    .get(0)
+                    .ok_or(EvmError::MintBurnInSubchainFailed)?;
+
+                if event_hash != transfer_event() {
+                    ic_msg!(
+                        invoke_context, 
+                        "Emitted event was malformed. Expected event hash: {:?}, actual event hash: {:?}", 
+                        transfer_event(), 
+                        event_hash
+                    );
+                    return Err(EvmError::MintBurnInSubchainFailed);
+                }
+
+                fn extract_address(invoke_context: &InvokeContext, topic: Option<&H256>, arg_name: &str) -> Result<H160, EvmError> {
+                    let Some(topic) = topic else {
+                        ic_msg!(invoke_context, "Transfer event `{}` argument were not provided", arg_name);
+                        return Err(EvmError::MintBurnInSubchainFailed);
+                    };
+
+                    if &topic[0..12] != &[0; 12] {
+                        ic_msg!(invoke_context, "Transfer event `{}` argument is malformed", arg_name);
+                        return Err(EvmError::MintBurnInSubchainFailed);
+                    }
+
+                    Ok(H160::from_slice(&topic.as_fixed_bytes()[12..]))
+                }
+
+                let from = extract_address(invoke_context, log.topics.get(1), "from")?;
+                let to = extract_address(invoke_context, log.topics.get(2), "to")?;
+                let value = U256::from(log.data.as_slice());
+
+                match (from.is_zero(), to.is_zero()) {
+                    (true, false) => {
+                        ic_msg!(invoke_context, "Minting {} wei to {:?}", value, to);
+                        executor.deposit(to, value);
+                    },
+                    (false, true) => {
+                        executor.withdraw(from, value).map_err(|err| {
+                            // could it be anything else than ExitError::OutOfFund? clarify error message?
+                            ic_msg!(invoke_context, "Transfer event `burn` failed to execute: {:?}", err);
+                            EvmError::MintBurnInSubchainFailed
+                        })?;
+                        ic_msg!(invoke_context, "Burning {} wei from {:?}", value, from);
+                    },
+                    _ => {
+                        ic_msg!(invoke_context, "Exaclty one of the `from` or `to` arguments must be set to zero. From: {:?}, to: {:?}", from, to);
+                        return Err(EvmError::MintBurnInSubchainFailed)
+                    }
+                }
+
+                log::info!(
+                    "Mint-Burn Contract for subchain {} successfully executed. From: {:?}, to: {:?}, wei: {}",
+                    executor.chain_id(),
+                    from,
+                    to,
+                    value
+                );
+            }
+        }
+
+        Ok(())
     }
 }
 
