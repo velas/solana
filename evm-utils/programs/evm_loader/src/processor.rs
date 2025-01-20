@@ -880,9 +880,8 @@ impl EvmProcessor {
             ic_msg!(invoke_context, "Transaction execution error: {}", e);
             EvmError::InternalExecutorError
         })?;
-        let receipt = executor.get_tx_receipt_by_hash(result.tx_id);
-
-        if let Some(receipt) = receipt.cloned() {
+        
+        if let Some(receipt) = executor.get_tx_receipt_by_hash(result.tx_id).cloned() {
             if receipt.status.is_succeed() {
                 Self::mint_burn_eth_in_subchain(executor, invoke_context, receipt)?;
             }
