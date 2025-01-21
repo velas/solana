@@ -7,6 +7,7 @@ use {
         scope::solana,
     },
     borsh::{BorshDeserialize, BorshSchema, BorshSerialize},
+    evm_state::U256,
     solana_sdk::{account::ReadableAccount, borsh::get_instance_packed_len},
 };
 
@@ -35,6 +36,8 @@ pub struct SubchainState {
     pub owner: solana::Address,
     // Mutable state:
     pub last_hashes: BlockhashQueue,
+    pub gas_price: U256,
+    // pub whitelisted: BTreeSet<solana::Address>, // TODO: BTreeSet != BorshSchema
 }
 
 impl SubchainState {
@@ -47,6 +50,8 @@ impl SubchainState {
             token_name: config.token_name,
             owner,
             last_hashes: BlockhashQueue::new(),
+            gas_price: config.gas_price,
+            // whitelisted,
         }
     }
 
@@ -104,13 +109,15 @@ mod test {
     #[test]
     fn check_update_serialize() {
         let config = SubchainConfig {
-            hardfork: Hardfork::Istanbul,
-            network_name: "test".to_string(),
-            token_name: "test".to_string(),
             alloc: BTreeMap::from_iter([(
                 H160::zero(),
                 AllocAccount::new_with_balance(lamports_to_wei(12)),
             )]),
+            hardfork: Hardfork::Istanbul,
+            network_name: "test".to_string(),
+            token_name: "test".to_string(),
+            whitelisted: Default::default(),
+            gas_price: 123.into(),
         };
         let mut state = SubchainState::new(config, solana::Address::default(), 0);
         state.update(|h| h.push(H256::repeat_byte(0x11), 12));

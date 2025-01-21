@@ -200,32 +200,25 @@ pub struct Executor {
     pub evm_backend: EvmBackend<Incomming>,
     chain_context: ChainContext,
     config: EvmConfig,
-
+    gas_price: U256,
     pub feature_set: FeatureSet,
 }
 
 impl Executor {
-    // Return new default executor, with empty state stored in temporary dirrectory
     pub fn testing() -> Self {
         Self::with_config(
             Default::default(),
             Default::default(),
+            U256::from(1), // TODO: Set default gas price
             Default::default(),
-            Default::default(),
-        )
-    }
-    pub fn default_configs(state: EvmBackend<Incomming>) -> Self {
-        Self::with_config(
-            state,
-            Default::default(),
-            Default::default(),
-            Default::default(),
+            FeatureSet::new_with_all_enabled(),
         )
     }
 
     pub fn with_config(
         evm_backend: EvmBackend<Incomming>,
         chain_context: ChainContext,
+        gas_price: U256,
         config: EvmConfig,
         feature_set: FeatureSet,
     ) -> Self {
@@ -233,6 +226,7 @@ impl Executor {
             evm_backend,
             chain_context,
             config,
+            gas_price,
             feature_set,
         }
     }
@@ -301,6 +295,7 @@ impl Executor {
             .is_accept_zero_gas_price_with_native_fee_enabled()
             && !withdraw_fee // fee_payer = Native
             && gas_price.is_zero()
+        // TODO: Check gas_price < burn_gas_price
         {
             gas_price = self.config.burn_gas_price;
         } else {
@@ -324,6 +319,7 @@ impl Executor {
         );
 
         let max_fee = gas_limit * gas_price;
+
         if withdraw_fee {
             ensure!(
                 max_fee + value <= state_account.balance,
@@ -835,12 +831,8 @@ mod tests {
             chain_id,
             ..EvmConfig::default()
         };
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            evm_config,
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
+        executor.config = evm_config;
 
         let code = hex::decode(METACOIN_CODE).unwrap();
 
@@ -881,12 +873,9 @@ mod tests {
             chain_id,
             ..EvmConfig::default()
         };
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            evm_config,
-            FeatureSet::new(false, true, false),
-        );
+        let mut executor = Executor::testing();
+        executor.config = evm_config;
+        executor.feature_set = FeatureSet::new(false, true, false);
 
         let code = hex::decode(METACOIN_CODE).unwrap();
 
@@ -935,12 +924,10 @@ mod tests {
                 Storage::create_temporary()
             };
             let backend = EvmBackend::new(Incomming::default(), storage.unwrap());
-            let mut executor = Executor::with_config(
-                backend,
-                Default::default(),
-                evm_config,
-                FeatureSet::new_with_all_enabled(),
-            );
+
+            let mut executor = Executor::testing();
+            executor.evm_backend = backend;
+            executor.config = evm_config;
 
             let code = hex::decode(METACOIN_CODE).unwrap();
 
@@ -970,12 +957,9 @@ mod tests {
                 .register_slot(slot, first_root, vec![], false)
                 .unwrap();
 
-            let mut executor = Executor::with_config(
-                backend,
-                Default::default(),
-                evm_config,
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = backend;
+            executor.config = evm_config;
             let contract_address = create_tx.address().unwrap();
 
             alice.nonce += 1;
@@ -1034,12 +1018,8 @@ mod tests {
             chain_id,
             ..EvmConfig::new(chain_id, true)
         };
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            evm_config,
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
+        executor.config = evm_config;
 
         let alice = Persona::new();
         let mut create_tx = alice.unsigned(TransactionAction::Call(H160::zero()), &[]);
@@ -1094,12 +1074,8 @@ mod tests {
             chain_id,
             ..EvmConfig::default()
         };
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            evm_config,
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
+        executor.config = evm_config;
 
         let code = hex::decode(METACOIN_CODE).unwrap();
 
@@ -1157,12 +1133,8 @@ mod tests {
             chain_id,
             ..EvmConfig::default()
         };
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            evm_config,
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
+        executor.config = evm_config;
 
         let code = hex::decode(METACOIN_CODE).unwrap();
 
@@ -1218,12 +1190,7 @@ mod tests {
 
         let code = hex::decode(METACOIN_CODE).unwrap();
 
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            Default::default(),
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
 
         let mut alice = Persona::new();
         let create_tx = alice.create(&code);
@@ -1373,12 +1340,8 @@ mod tests {
             let mut bob = bob.clone();
 
             let state = committed.next_incomming(0);
-            let mut executor = Executor::with_config(
-                state,
-                Default::default(),
-                Default::default(),
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = state;
 
             let send_tx = bob.call(
                 contract,
@@ -1471,12 +1434,8 @@ mod tests {
         {
             // NOTE: ensure blockss are different
             let state = committed.next_incomming(0);
-            let mut executor = Executor::with_config(
-                state,
-                Default::default(),
-                Default::default(),
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = state;
 
             let send_tx = alice.call(
                 contract,
@@ -1575,12 +1534,8 @@ mod tests {
         let code = hex::decode(HELLO_WORLD_CODE).unwrap();
         let data = hex::decode(HELLO_WORLD_ABI).unwrap();
 
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            Default::default(),
-            FeatureSet::new(false, true, false),
-        );
+        let mut executor = Executor::testing();
+        executor.feature_set = FeatureSet::new(false, true, false);
 
         let exit_reason = match executor.with_executor(OwnedPrecompile::default(), |e| {
             e.create(

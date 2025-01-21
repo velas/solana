@@ -87,13 +87,13 @@ macro_rules! get_executor
         )
     };
     // Get subchain
-    ($rc:expr,$refmut:expr => $invoke_context:expr, $chain_id: expr, $last_hashes: expr) => {
+    ($rc:expr,$refmut:expr => $invoke_context:expr, $chain_id: expr, $last_hashes: expr, $gas_price: expr) => {
         get_executor!(@
             $rc,
             $refmut => ChainParam::GetSubchain {
                 chain_id: $chain_id,
-                subchain_hashes: $last_hashes
-
+                subchain_hashes: $last_hashes,
+                gas_price: $gas_price
             },
             $invoke_context
         )
@@ -367,7 +367,7 @@ impl EvmProcessor {
                     (tx_gas_price, 0)
                 };
                 let max_fee = max_fee * tx_gas_limit;
-                let max_fee_in_lamports = wei_to_lamports(max_fee);
+                let max_fee_in_lamports = wei_to_lamports(max_fee).0;
                 let Some(amount) = fee_payer
                     .account
                     .borrow()
@@ -381,14 +381,14 @@ impl EvmProcessor {
                     );
                     return Err(EvmError::NativeAccountInsufficientFunds);
                 };
-                if amount < max_fee_in_lamports.0 {
+                if amount < max_fee_in_lamports {
                     if subchain {
-                        ic_msg!(invoke_context, "Fee payer has not enough lamports to pay fee, max_fee:{}, min_deposit:{}, amount:{},", max_fee_in_lamports.0, min_lamports, amount);
+                        ic_msg!(invoke_context, "Fee payer has not enough lamports to pay fee, max_fee:{}, min_deposit:{}, amount:{},", max_fee_in_lamports, min_lamports, amount);
                     } else {
                         ic_msg!(
                             invoke_context,
                             "Fee payer has not enough lamports to pay fee, max_fee:{}, amount:{},",
-                            max_fee_in_lamports.0,
+                            max_fee_in_lamports,
                             amount
                         );
                     }
@@ -1192,6 +1192,12 @@ impl EvmProcessor {
         state.save(accounts)
     }
 
+    // Accounts:
+    // 0. evm_loader
+    // 1. evm_state
+    // 2. evm_state_pda (custom)
+    // 3. Optional(storage)
+    // 4. Sender <- Bridge
     fn process_execute_subchain_tx(
         &self,
         invoke_context: &mut InvokeContext,
@@ -1201,6 +1207,10 @@ impl EvmProcessor {
     ) -> Result<(), EvmError> {
         let (rc, mut refmut);
         let accounts = Self::build_account_structure(first_keyed_account, invoke_context).unwrap();
+        let sender_idx = if tx.is_big() { 3 } else { 2 };
+        // TODO: check sender is whitelisted
+        let sender = &accounts.users[sender_idx];
+
         let mut state = crate::subchain::SubchainState::load(accounts)?;
         let last_hashes = Box::new(state.last_hashes().get_hashes().clone());
         let executor = get_executor!(rc, refmut => invoke_context, chain_id, last_hashes);

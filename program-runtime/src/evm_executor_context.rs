@@ -432,18 +432,27 @@ pub enum ChainParam {
     GetSubchain {
         chain_id: ChainID,
         subchain_hashes: SubchainHashes,
+        gas_price: U256,
     },
 }
 impl ChainParam {
     pub fn is_main(&self) -> bool {
         matches!(self, ChainParam::GetMainChain)
     }
+
     // Return None if main chain
     pub fn chain_id(&self) -> Chain {
         match self {
             ChainParam::GetMainChain => None,
             ChainParam::CreateSubchain { chain_id } => Some(*chain_id),
             ChainParam::GetSubchain { chain_id, .. } => Some(*chain_id),
+        }
+    }
+
+    pub fn gas_price(&self) -> U256 {
+        match self {
+            ChainParam::GetSubchain { gas_price, .. } => *gas_price,
+            _ => BURN_GAS_PRICE.into(),
         }
     }
 }
@@ -514,6 +523,7 @@ impl EvmExecutorContext {
             let evm_executor = evm_state::Executor::with_config(
                 state.clone(),
                 evm_state::ChainContext::new(last_hashes),
+                params.gas_price(),
                 evm_state::EvmConfig::new(
                     params
                         .chain_id()
@@ -541,6 +551,7 @@ impl EvmExecutorContext {
             }
             ChainParam::GetSubchain {
                 chain_id: _,
+                gas_price: _,
                 subchain_hashes,
             } => (subchain_hashes.deref()).clone(),
             ChainParam::GetMainChain => self.evm.main_chain().blockhashes().get_hashes().clone(),

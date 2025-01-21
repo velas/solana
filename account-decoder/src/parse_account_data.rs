@@ -143,12 +143,12 @@ pub fn parse_account_data(
         ParsableAccount::EvmState => {
             let val = solana_evm_loader_program::subchain::SubchainState::try_from_slice(data)
                 .map_err(|e| {
-                    println!("Parse error: {:?}", e);
+                    println!("Subchain State parse error: {:?}", e);
                     ParseAccountError::AccountNotParsable(ParsableAccount::EvmState)
                 })?;
             let expected_addr = solana_evm_loader_program::evm_state_subchain_account(val.chain_id);
             if pubkey != &expected_addr {
-                println!("Parse 111");
+                println!("Unexpected Public Key");
                 return Err(ParseAccountError::AccountNotParsable(
                     ParsableAccount::EvmState,
                 ));
@@ -224,10 +224,12 @@ mod test {
         assert_eq!(parsed.space, State::size() as u64);
         let evm_state_subchain = SubchainState::new(
             SubchainConfig {
+                alloc: Default::default(),
+                hardfork: Hardfork::Istanbul,
                 token_name: "token_name".to_string(),
                 network_name: "network_name".to_string(),
-                hardfork: Hardfork::Istanbul,
-                alloc: Default::default(),
+                whitelisted: Default::default(),
+                gas_price: 4242.into(),
             },
             account_pubkey,
             1,
@@ -263,5 +265,7 @@ mod test {
                 .unwrap(),
             "network_name"
         );
+
+        todo!("Add asserts for `gas_price` and `whitelisted`")
     }
 }
