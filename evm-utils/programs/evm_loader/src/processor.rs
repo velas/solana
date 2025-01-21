@@ -13,7 +13,7 @@ use {
     },
     borsh::BorshDeserialize,
     evm::{wei_to_lamports, Executor, ExitReason},
-    evm_state::{ExecutionResult, MemoryAccount, H160, U256},
+    evm_state::{ExecutionResult, MemoryAccount, TransactionReceipt, H160, H256, U256},
     log::*,
     serde::de::DeserializeOwned,
     solana_program_runtime::{
@@ -29,7 +29,7 @@ use {
         program_utils::limited_deserialize,
         system_instruction,
     },
-    std::{cell::RefMut, fmt::Write, ops::DerefMut},
+    std::{cell::RefMut, fmt::Write, ops::DerefMut, sync::OnceLock},
 };
 
 pub const BURN_ADDR: evm_state::H160 = evm_state::H160::zero();
@@ -379,19 +379,27 @@ impl EvmProcessor {
                 else {
                     ic_msg!(
                         invoke_context,
-                        "Fee payer don't have min_deposit {}",
+                        "Fee payer {} don't have min_deposit {}",
+                        fee_payer.unsigned_key(),
                         min_deposit
                     );
                     return Err(EvmError::NativeAccountInsufficientFunds);
                 };
-
                 if amount < max_fee_in_lamports {
                     if is_subchain {
-                        ic_msg!(invoke_context, "Fee payer has not enough lamports to pay fee, max_fee: {}, min_deposit: {}, amount: {}", max_fee_in_lamports, min_deposit, amount);
+                        ic_msg!(
+                            invoke_context,
+                            "Fee payer {} has not enough lamports to pay fee, max_fee:{}, min_deposit:{}, amount:{},",
+                            fee_payer.unsigned_key(),
+                            max_fee_in_lamports,
+                            min_deposit,
+                            amount
+                        );
                     } else {
                         ic_msg!(
                             invoke_context,
-                            "Fee payer has not enough lamports to pay fee, max_fee: {}, amount: {}",
+                            "Fee payer {} has not enough lamports to pay fee, max_fee:{}, amount:{},",
+                            fee_payer.unsigned_key(),
                             max_fee_in_lamports,
                             amount
                         );
@@ -865,6 +873,7 @@ impl EvmProcessor {
         Ok(())
     }
 
+    // hangle EVM logs
     pub fn handle_subchain_transaction_result(
         &self,
         executor: &mut Executor,
@@ -878,6 +887,12 @@ impl EvmProcessor {
             ic_msg!(invoke_context, "Transaction execution error: {}", e);
             EvmError::InternalExecutorError
         })?;
+
+        if let Some(receipt) = executor.get_tx_receipt_by_hash(result.tx_id).cloned() {
+            if receipt.status.is_succeed() {
+                Self::mint_burn_eth_in_subchain(executor, invoke_context, receipt)?;
+            }
+        }
 
         write!(
             crate::solana_extension::MultilineLogger::new(invoke_context.get_log_collector()),
@@ -924,6 +939,7 @@ impl EvmProcessor {
         // if subchain - skip all logic related to fee refund and native swap.
         return Ok(());
     }
+
     // Handle executor errors.
     // refund fee
     pub fn handle_transaction_result(
@@ -1269,6 +1285,97 @@ impl EvmProcessor {
 
         let users = &keyed_accounts[(first_keyed_account + 1)..];
         Ok(AccountStructure::new(first, users))
+    }
+
+    fn mint_burn_eth_in_subchain(
+        executor: &mut Executor,
+        invoke_context: &InvokeContext,
+        receipt: TransactionReceipt,
+    ) -> Result<(), EvmError> {
+        const MINT_BURN_CONTRACT: H160 = H160::zero();
+
+        fn transfer_event() -> &'static H256 {
+            static TRANSFER_EVENT: OnceLock<H256> = OnceLock::new();
+
+            TRANSFER_EVENT.get_or_init(|| {
+                ethabi::Event {
+                    name: "Transfer".into(),
+                    inputs: vec![
+                        ethabi::EventParam {
+                            name: "from".into(),
+                            kind: ethabi::ParamType::Address,
+                            indexed: true,
+                        },
+                        ethabi::EventParam {
+                            name: "to".into(),
+                            kind: ethabi::ParamType::Address,
+                            indexed: true,
+                        },
+                        ethabi::EventParam {
+                            name: "value".into(),
+                            kind: ethabi::ParamType::Uint(256),
+                            indexed: false,
+                        },
+                    ],
+                    anonymous: false,
+                }
+                .signature()
+            })
+        }
+
+        for log in receipt.logs.iter() {
+            if log.address == MINT_BURN_CONTRACT {
+                // skip non-transfer events
+                if log.topics.first() != Some(&transfer_event()) {
+                    continue;
+                }
+
+                // skip malformed transfer events
+                fn is_valid_address(address: H256) -> bool {
+                    &address[0..12] != &[0; 12]
+                }
+
+                if log.topics.len() != 3 || log.data.len() != 32 {
+                    ic_msg!(invoke_context, "Transfer event argument is malformed");
+                    continue;
+                }
+
+                if !is_valid_address(log.topics[1]) || !is_valid_address(log.topics[2]) {
+                    ic_msg!(invoke_context, "Transfer event argument is malformed");
+                    continue;
+                }
+
+                // at this point transfer arguments must be valid
+                let from = H160::from_slice(&log.topics[1].as_fixed_bytes()[12..]);
+                let to = H160::from_slice(&log.topics[2].as_fixed_bytes()[12..]);
+                let value = U256::from(log.data.as_slice());
+
+                match (from.is_zero(), to.is_zero()) {
+                    (true, false) => {
+                        ic_msg!(invoke_context, "Minting {} wei to {:?}", value, to);
+                        executor.deposit(to, value);
+                    }
+                    (false, true) => {
+                        executor.withdraw(from, value).map_err(|err| {
+                            // could it be anything else than ExitError::OutOfFund? clarify error message?
+                            ic_msg!(
+                                invoke_context,
+                                "Transfer event `burn` failed to execute: {:?}",
+                                err
+                            );
+                            EvmError::MintBurnInSubchainFailed
+                        })?;
+                        ic_msg!(invoke_context, "Burning {} wei from {:?}", value, from);
+                    }
+                    (true, true) => {
+                        ic_msg!(invoke_context, "Exaclty one of the `from` or `to` arguments must be set to zero. From: {:?}, to: {:?}", from, to);
+                    }
+                    (false, false) => {}
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 

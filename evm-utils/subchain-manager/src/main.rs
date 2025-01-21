@@ -1,5 +1,4 @@
 use {
-    color_eyre::eyre::WrapErr,
     evm_rpc::{Bytes, FormatHex},
     evm_state::{BURN_GAS_PRICE_IN_SUBCHAIN, U256},
     genesis_json::ChainID,
@@ -139,8 +138,10 @@ impl Config {
                 ) => break,
                 Err(err) => return Err(err.into()),
             };
+
             addresses.push(address);
             balances.push(balance);
+
             let naddress: Option<_> =
                 match inquire::Text::new("One more minting address (esc to skip):")
                     .with_validator(
@@ -231,7 +232,6 @@ impl Config {
             ) => Ok(None),
             Err(err) => Err(err.into()),
         }
-        // }
     }
 
     fn input_hardfork(_context: &InputContext) -> color_eyre::eyre::Result<Option<Hardfork>> {
@@ -243,7 +243,7 @@ impl Config {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, clap::Parser)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, clap::Parser)]
 pub struct MintingAddresses {
     address: Vec<Address>,
     balance: Vec<Balance>,
@@ -285,6 +285,7 @@ impl Display for Balance {
         }
     }
 }
+
 impl FromStr for Balance {
     type Err = Box<dyn Error + Send + Sync>;
 
@@ -308,8 +309,6 @@ impl FromStr for Balance {
     }
 }
 
-// type Address = evm_state::Address;
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct Address(evm_state::Address);
 impl Display for Address {
@@ -327,15 +326,15 @@ impl FromStr for Address {
 }
 #[derive(Debug, Clone, interactive_clap::InteractiveClap, serde::Serialize, serde::Deserialize)]
 pub struct DeployConfig {
-    /// Path to config file:
+    /// Path to Config file:
     #[interactive_clap(long)]
     config_file: String,
 
-    /// Velas rpc url:
+    /// Velas RPC URL:
     #[interactive_clap(long)]
     velas_rpc: String,
 
-    /// Path to keypair:
+    /// Path to Keypair file:
     #[interactive_clap(long)]
     #[interactive_clap(skip_default_input_arg)]
     keypair_path: String,
@@ -493,7 +492,7 @@ impl TryFrom<CliCmd> for Cmd {
     type Error = Box<dyn Error + Send + Sync>;
     fn try_from(value: CliCmd) -> Result<Self, Self::Error> {
         let Some(subcommand) = value.subcommand else {
-            return Err("Command was not choosen".into());
+            return Err("Command was not chosen".into());
         };
 
         let subcommand = match subcommand {
@@ -578,10 +577,7 @@ fn none_if_empty(val: String) -> Option<String> {
 }
 impl From<genesis_json::GenesisConfig> for CliConfig {
     fn from(config: genesis_json::GenesisConfig) -> Self {
-        let mut minting_addresses = MintingAddresses {
-            address: vec![],
-            balance: vec![],
-        };
+        let mut minting_addresses = MintingAddresses::default();
         for (addr, account) in config.alloc.0.iter() {
             minting_addresses.address.push(Address(*addr));
             minting_addresses.balance.push(Balance(account.balance));
@@ -699,24 +695,28 @@ fn main() -> color_eyre::Result<()> {
             println!("Make sure to review it before deployment.");
         }
         SubCommand::CreateAndDeploy(file_config) => {
-            println!("Loading config from file {}", file_config.config_file);
+            println!("Loading Config from file {}", file_config.config_file);
             let genesis_config = genesis_json::GenesisConfig::load(&file_config.config_file)?;
-            println!("Loading keypair from file {}", file_config.keypair_path);
+            println!("Loading Keypair from file {}", file_config.keypair_path);
             let keypair = solana_sdk::signer::keypair::read_keypair_file(&file_config.keypair_path)
                 .map_err(|e| {
                     color_eyre::eyre::Error::msg(format!("Cannot read keypair file: {}", e))
                 })?;
 
-            println!("Connecting to rpc {}", file_config.velas_rpc);
+            println!("Connecting to RPC {}", file_config.velas_rpc);
             let client = solana_client::rpc_client::RpcClient::new(file_config.velas_rpc);
-            println!("Checking rpc connection");
+            println!("Checking RPC connection");
             client.get_slot()?;
-            println!("Deploying subchain account...");
+            println!("Deploying Subchain State Account...");
             genesis_config.deploy(keypair, &client, false)?;
             let program_key = solana_evm_loader_program::evm_state_subchain_account(
                 genesis_config.config.chain_id.into(),
             );
-            println!("Deployment successful, subchain address={}", program_key);
+            println!(
+                "Deployment successful, Subchain State Account: {}",
+                program_key
+            );
+            println!("Fund Subchain State Account to cover Subchain transaction fees");
         }
     }
     Ok(())

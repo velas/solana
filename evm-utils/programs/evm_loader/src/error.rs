@@ -88,6 +88,9 @@ pub enum EvmError {
 
     #[snafu(display("EVM Subchain Execution is forbidden for Native Sender."))]
     EVMSubchainExecutionForbidden,
+
+    #[snafu(display("Mint/Burn Eth in subchain failed."))]
+    MintBurnInSubchainFailed,
 }
 
 impl<E> DecodeError<E> for EvmError {

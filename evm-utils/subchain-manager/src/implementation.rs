@@ -72,12 +72,10 @@ impl genesis_json::GenesisConfig {
             &[&keypair],
             client.get_latest_blockhash()?,
         );
-        // dry run:
         let simulation = client.simulate_transaction(&transaction)?;
         if let Some(err) = simulation.value.err {
             return Err(color_eyre::eyre::Error::msg(format!(
-                "Simulation error: {:?}",
-                err
+                "Simulation error: {err}"
             )));
         }
 

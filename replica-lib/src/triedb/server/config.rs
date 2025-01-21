@@ -81,7 +81,7 @@ impl Config {
         let range_file = matches.value_of("range_file");
         let height_index_source = matches
             .value_of("height_index_source")
-            .ok_or(ParseError::NoRangeSource)?;
+            .ok_or(ParseError::NoHeightIndex)?;
         let bigtable_length_hint: BlockNum = matches
             .value_of("bigtable_length_hint")
             .unwrap_or(MAINNET_HINT_DEFAULT)
@@ -103,17 +103,18 @@ impl Config {
 
     pub fn parse_validator(matches: &ArgMatches) -> Result<Self, ParseError> {
         let range_source = matches
+            // FIXME: wrong CLI Argument Name
             .value_of("evm_height_index_source")
             .ok_or(ParseError::NoRangeSource)?;
         let range_file = None;
         let height_index_source = matches
             .value_of("evm_height_index_source")
-            .ok_or(ParseError::NoRangeSource)?;
+            .ok_or(ParseError::NoHeightIndex)?;
         let bigtable_length_hint: BlockNum = matches
             .value_of("bigtable_evm_blockstore_length_hint")
             .unwrap_or(MAINNET_HINT_DEFAULT)
             .parse()?;
-        let max_diff_height_gap: usize= matches
+        let max_diff_height_gap: usize = matches
             .value_of("evm_state_rpc_max_height_diff")
             .unwrap_or(MAX_HEIGHT_DIFF_DEFAULT)
             .parse()?;

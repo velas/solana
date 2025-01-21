@@ -183,7 +183,11 @@ fn patch_subchain_call(meta: Arc<EvmBridge>, call: Call) -> Option<Call> {
                         return None;
                     }
                 };
-                log::debug!("params: {:?}", params);
+                log::debug!(
+                    "method: {}, params: {}",
+                    method_call.method,
+                    serde_json::to_string(&params).unwrap()
+                );
                 if let Some(method) = subchain_methods_collector::ETH_METHODS
                     .get(&method_call.method)
                     .clone()
