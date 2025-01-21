@@ -3,7 +3,7 @@ use {
         mapref::one::{MappedRef, MappedRefMut, Ref, RefMut},
         DashMap,
     },
-    evm_state::{AccountProvider, EvmBackend, Executor, TEST_CHAIN_ID},
+    evm_state::{AccountProvider, EvmBackend, Executor, BURN_GAS_PRICE, TEST_CHAIN_ID, U256},
     log::{debug, warn},
     serde::{
         de::{SeqAccess, Visitor},

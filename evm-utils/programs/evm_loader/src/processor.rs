@@ -381,19 +381,26 @@ impl EvmProcessor {
                         invoke_context,
                         "Fee payer {} don't have min_deposit {}",
                         fee_payer.unsigned_key(),
-                        min_lamports
+                        min_deposit
                     );
                     return Err(EvmError::NativeAccountInsufficientFunds);
                 };
-                if amount < max_fee_in_lamports.0 {
-                    if subchain {
-                        ic_msg!(invoke_context, "Fee payer {} has not enough lamports to pay fee, max_fee:{}, min_deposit:{}, amount:{},", fee_payer.unsigned_key(), max_fee_in_lamports.0, min_lamports, amount);
+                if amount < max_fee_in_lamports {
+                    if is_subchain {
+                        ic_msg!(
+                            invoke_context,
+                            "Fee payer {} has not enough lamports to pay fee, max_fee:{}, min_deposit:{}, amount:{},",
+                            fee_payer.unsigned_key(),
+                            max_fee_in_lamports,
+                            min_deposit,
+                            amount
+                        );
                     } else {
                         ic_msg!(
                             invoke_context,
                             "Fee payer {} has not enough lamports to pay fee, max_fee:{}, amount:{},",
                             fee_payer.unsigned_key(),
-                            max_fee_in_lamports.0,
+                            max_fee_in_lamports,
                             amount
                         );
                     }
