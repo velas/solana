@@ -880,7 +880,7 @@ impl EvmProcessor {
             ic_msg!(invoke_context, "Transaction execution error: {}", e);
             EvmError::InternalExecutorError
         })?;
-        
+
         if let Some(receipt) = executor.get_tx_receipt_by_hash(result.tx_id).cloned() {
             if receipt.status.is_succeed() {
                 Self::mint_burn_eth_in_subchain(executor, invoke_context, receipt)?;
@@ -1318,65 +1318,53 @@ impl EvmProcessor {
 
         for log in receipt.logs.iter() {
             if log.address == MINT_BURN_CONTRACT {
-                let event_hash = log
-                    .topics
-                    .get(0)
-                    .ok_or(EvmError::MintBurnInSubchainFailed)?;
-
-                if event_hash != transfer_event() {
-                    ic_msg!(
-                        invoke_context, 
-                        "Emitted event was malformed. Expected event hash: {:?}, actual event hash: {:?}", 
-                        transfer_event(), 
-                        event_hash
-                    );
-                    return Err(EvmError::MintBurnInSubchainFailed);
+                // skip non-transfer events
+                if log.topics.first() != Some(&transfer_event()) {
+                    continue;
                 }
 
-                fn extract_address(invoke_context: &InvokeContext, topic: Option<&H256>, arg_name: &str) -> Result<H160, EvmError> {
-                    let Some(topic) = topic else {
-                        ic_msg!(invoke_context, "Transfer event `{}` argument were not provided", arg_name);
-                        return Err(EvmError::MintBurnInSubchainFailed);
-                    };
-
-                    if &topic[0..12] != &[0; 12] {
-                        ic_msg!(invoke_context, "Transfer event `{}` argument is malformed", arg_name);
-                        return Err(EvmError::MintBurnInSubchainFailed);
-                    }
-
-                    Ok(H160::from_slice(&topic.as_fixed_bytes()[12..]))
+                // skip malformed transfer events
+                fn is_valid_address(address: H256) -> bool {
+                    &address[0..12] != &[0; 12]
                 }
 
-                let from = extract_address(invoke_context, log.topics.get(1), "from")?;
-                let to = extract_address(invoke_context, log.topics.get(2), "to")?;
+                if log.topics.len() != 3 || log.data.len() != 32 {
+                    ic_msg!(invoke_context, "Transfer event argument is malformed");
+                    continue;
+                }
+
+                if !is_valid_address(log.topics[1]) || !is_valid_address(log.topics[2]) {
+                    ic_msg!(invoke_context, "Transfer event argument is malformed");
+                    continue;
+                }
+
+                // at this point transfer arguments must be valid
+                let from = H160::from_slice(&log.topics[1].as_fixed_bytes()[12..]);
+                let to = H160::from_slice(&log.topics[2].as_fixed_bytes()[12..]);
                 let value = U256::from(log.data.as_slice());
 
                 match (from.is_zero(), to.is_zero()) {
                     (true, false) => {
                         ic_msg!(invoke_context, "Minting {} wei to {:?}", value, to);
                         executor.deposit(to, value);
-                    },
+                    }
                     (false, true) => {
                         executor.withdraw(from, value).map_err(|err| {
                             // could it be anything else than ExitError::OutOfFund? clarify error message?
-                            ic_msg!(invoke_context, "Transfer event `burn` failed to execute: {:?}", err);
+                            ic_msg!(
+                                invoke_context,
+                                "Transfer event `burn` failed to execute: {:?}",
+                                err
+                            );
                             EvmError::MintBurnInSubchainFailed
                         })?;
                         ic_msg!(invoke_context, "Burning {} wei from {:?}", value, from);
-                    },
-                    _ => {
-                        ic_msg!(invoke_context, "Exaclty one of the `from` or `to` arguments must be set to zero. From: {:?}, to: {:?}", from, to);
-                        return Err(EvmError::MintBurnInSubchainFailed)
                     }
+                    (true, true) => {
+                        ic_msg!(invoke_context, "Exaclty one of the `from` or `to` arguments must be set to zero. From: {:?}, to: {:?}", from, to);
+                    }
+                    (false, false) => {}
                 }
-
-                log::info!(
-                    "Mint-Burn Contract for subchain {} successfully executed. From: {:?}, to: {:?}, wei: {}",
-                    executor.chain_id(),
-                    from,
-                    to,
-                    value
-                );
             }
         }
 

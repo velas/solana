@@ -20,7 +20,7 @@ pub enum BanksClientError {
     #[error("transport transaction error: {0}")]
     TransactionError(#[from] TransactionError),
 
-    #[error("simulation error: {err}, logs: {logs:?}, units_consumed: {units_consumed:?}")]
+    #[error("simulation error: {err:?}, logs: {logs:?}, units_consumed: {units_consumed:?}")]
     SimulationError {
         err: TransactionError,
         logs: Vec<String>,

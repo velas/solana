@@ -130,7 +130,7 @@ impl Config {
             Err(err) => return Err(err.into()),
         };
         loop {
-            let balance: Balance = match inquire::CustomType::new("Balance (in Eth):").prompt() {
+            let balance: Balance = match inquire::CustomType::new("Balance:").prompt() {
                 Ok(value) => value,
                 Err(
                     inquire::error::InquireError::OperationCanceled

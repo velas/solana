@@ -176,36 +176,34 @@ fn patch_subchain_call(meta: Arc<EvmBridge>, call: Call) -> Option<Call> {
 
             if meta.subchain {
                 let mut params = match method_call.params {
-                    Params::Array(params) => Value::Array(params),
-                    Params::None => Value::Array(vec![]),
+                    Params::Array(params) => params,
+                    Params::None => vec![],
                     _ => {
                         log::warn!("Invalid params type for method call: {:?}", method_call);
                         return None;
                     }
                 };
-                log::debug!("method: {}, params: {}", &method_call.method, params);
+                log::debug!(
+                    "method: {}, params: {}",
+                    method_call.method,
+                    serde_json::to_string(&params).unwrap()
+                );
                 if let Some(method) = subchain_methods_collector::ETH_METHODS
                     .get(&method_call.method)
                     .clone()
                 {
                     method_call.method = method.clone();
-                    params
-                        .as_array_mut()
-                        .map(|params| params.insert(0, meta.evm_chain_id.into()));
+                    // params as array insert at index 0
+                    params = Some(Value::Number(meta.evm_chain_id.into()))
+                        .into_iter()
+                        .chain(params.into_iter())
+                        .collect();
                 } else {
-                    log::warn!("method not found in subchain: {:?}", method_call.method);
+                    log::warn!("Method not found in subchain: {:?}", method_call.method);
                     return None;
                 }
-
-                method_call.params = match params {
-                    Value::Array(a) => Params::Array(a),
-                    other => {
-                        log::error!("params type should be array: {}", other);
-                        return None;
-                    }
-                };
-
-                log::trace!("patched method call: {:?}", method_call);
+                method_call.params = Params::Array(params);
+                log::trace!("Patched method call: {:?}", method_call);
             }
             Call::MethodCall(method_call)
         }
