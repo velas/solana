@@ -835,6 +835,9 @@ mod tests {
             Code::from_str("0x0aff1020").unwrap(),
             Code(vec![10, 255, 16, 32])
         );
+
+        assert_eq!(Code(vec![]).to_string(), "0x");
+        assert_eq!(Code::from_str("0x").unwrap(), Code(vec![]));
     }
 
     #[test]
