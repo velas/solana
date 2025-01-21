@@ -200,26 +200,16 @@ pub struct Executor {
     pub evm_backend: EvmBackend<Incomming>,
     chain_context: ChainContext,
     config: EvmConfig,
-
     pub feature_set: FeatureSet,
 }
 
 impl Executor {
-    // Return new default executor, with empty state stored in temporary dirrectory
     pub fn testing() -> Self {
         Self::with_config(
             Default::default(),
             Default::default(),
             Default::default(),
-            Default::default(),
-        )
-    }
-    pub fn default_configs(state: EvmBackend<Incomming>) -> Self {
-        Self::with_config(
-            state,
-            Default::default(),
-            Default::default(),
-            Default::default(),
+            FeatureSet::new_with_all_enabled(),
         )
     }
 
@@ -258,7 +248,6 @@ impl Executor {
         tx_chain_id: Option<u64>,
         tx_hash: H256,
         withdraw_fee: bool,
-        allow_zero_fee: bool,
         precompiles: OwnedPrecompile,
     ) -> Result<ExecutionResult, Error> {
         let state_account = self
@@ -291,22 +280,28 @@ impl Executor {
 
         ensure!(
             gas_price <= U256::from(u64::MAX),
-            GasPriceOutOfBounds { gas_price }
+            GasPriceOutOfBounds {
+                min_gas_price: self.config.burn_gas_price,
+                gas_price
+            }
         );
 
-        if allow_zero_fee {
-            // skip check
-        } else if self
+        let native_fee_payer = !withdraw_fee;
+
+        if self
             .feature_set
             .is_accept_zero_gas_price_with_native_fee_enabled()
-            && !withdraw_fee // fee_payer = Native
+            && native_fee_payer
             && gas_price.is_zero()
         {
             gas_price = self.config.burn_gas_price;
         } else {
             ensure!(
                 gas_price >= self.config.burn_gas_price,
-                GasPriceOutOfBounds { gas_price }
+                GasPriceOutOfBounds {
+                    min_gas_price: self.config.burn_gas_price,
+                    gas_price
+                }
             );
         }
 
@@ -324,6 +319,7 @@ impl Executor {
         );
 
         let max_fee = gas_limit * gas_price;
+
         if withdraw_fee {
             ensure!(
                 max_fee + value <= state_account.balance,
@@ -415,7 +411,6 @@ impl Executor {
         caller: H160,
         tx: UnsignedTransaction,
         withdraw_fee: bool,
-        allow_zero_fee: bool,
         precompiles: OwnedPrecompile,
     ) -> Result<ExecutionResult, Error> {
         let chain_id = self.config.chain_id;
@@ -438,7 +433,6 @@ impl Executor {
             Some(chain_id),
             tx_hash,
             withdraw_fee,
-            allow_zero_fee,
             precompiles,
         )?;
 
@@ -450,7 +444,6 @@ impl Executor {
         &mut self,
         evm_tx: Transaction,
         withdraw_fee: bool,
-        allow_zero_fee: bool,
         precompiles: OwnedPrecompile,
     ) -> Result<ExecutionResult, Error> {
         let caller = evm_tx.caller()?; // This method verify signature.
@@ -474,7 +467,6 @@ impl Executor {
             evm_tx.signature.chain_id(),
             tx_hash,
             withdraw_fee,
-            allow_zero_fee,
             precompiles,
         )?;
 
@@ -835,12 +827,8 @@ mod tests {
             chain_id,
             ..EvmConfig::default()
         };
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            evm_config,
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
+        executor.config = evm_config;
 
         let code = hex::decode(METACOIN_CODE).unwrap();
 
@@ -850,12 +838,7 @@ mod tests {
         let create_tx = create_tx.sign(&alice.secret, Some(chain_id));
         assert!(matches!(
             executor
-                .transaction_execute(
-                    create_tx.clone(),
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default()
-                )
+                .transaction_execute(create_tx.clone(), true, OwnedPrecompile::default())
                 .unwrap()
                 .exit_reason,
             ExitReason::Succeed(ExitSucceed::Returned)
@@ -864,7 +847,7 @@ mod tests {
         let hash = create_tx.tx_id_hash();
         assert!(matches!(
             executor
-                .transaction_execute(create_tx, true, false/*allow zero */, OwnedPrecompile::default())
+                .transaction_execute(create_tx, true, OwnedPrecompile::default())
                 .unwrap_err(),
             Error::DuplicateTx { tx_hash } if tx_hash == hash
         ));
@@ -881,12 +864,9 @@ mod tests {
             chain_id,
             ..EvmConfig::default()
         };
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            evm_config,
-            FeatureSet::new(false, true, false),
-        );
+        let mut executor = Executor::testing();
+        executor.config = evm_config;
+        executor.feature_set = FeatureSet::new(false, true, false);
 
         let code = hex::decode(METACOIN_CODE).unwrap();
 
@@ -899,7 +879,6 @@ mod tests {
                     alice.address(),
                     create_tx.clone(),
                     true,
-                    false, /*allow zero */
                     OwnedPrecompile::default()
                 )
                 .unwrap()
@@ -910,7 +889,7 @@ mod tests {
         let hash = create_tx.signing_hash(Some(chain_id));
         assert!(matches!(
             executor
-            .transaction_execute_unsinged(alice.address(), create_tx, true,false/*allow zero */, OwnedPrecompile::default())
+            .transaction_execute_unsinged(alice.address(), create_tx, true, OwnedPrecompile::default())
                 .unwrap_err(),
             Error::DuplicateTx { tx_hash } if tx_hash == hash
         ));
@@ -935,12 +914,10 @@ mod tests {
                 Storage::create_temporary()
             };
             let backend = EvmBackend::new(Incomming::default(), storage.unwrap());
-            let mut executor = Executor::with_config(
-                backend,
-                Default::default(),
-                evm_config,
-                FeatureSet::new_with_all_enabled(),
-            );
+
+            let mut executor = Executor::testing();
+            executor.evm_backend = backend;
+            executor.config = evm_config;
 
             let code = hex::decode(METACOIN_CODE).unwrap();
 
@@ -948,12 +925,7 @@ mod tests {
             let create_tx = alice.create(&code);
             assert!(matches!(
                 executor
-                    .transaction_execute(
-                        create_tx.clone(),
-                        true,
-                        false, /*allow zero */
-                        OwnedPrecompile::default()
-                    )
+                    .transaction_execute(create_tx.clone(), true, OwnedPrecompile::default())
                     .unwrap()
                     .exit_reason,
                 ExitReason::Succeed(ExitSucceed::Returned)
@@ -970,12 +942,9 @@ mod tests {
                 .register_slot(slot, first_root, vec![], false)
                 .unwrap();
 
-            let mut executor = Executor::with_config(
-                backend,
-                Default::default(),
-                evm_config,
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = backend;
+            executor.config = evm_config;
             let contract_address = create_tx.address().unwrap();
 
             alice.nonce += 1;
@@ -991,12 +960,7 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(
-                    call_tx,
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default(),
-                )
+                .transaction_execute(call_tx, true, OwnedPrecompile::default())
                 .unwrap();
 
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
@@ -1030,16 +994,9 @@ mod tests {
             .init();
 
         let chain_id = 0xeba;
-        let evm_config = EvmConfig {
-            chain_id,
-            ..EvmConfig::new(chain_id, true)
-        };
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            evm_config,
-            FeatureSet::new_with_all_enabled(),
-        );
+        let evm_config = EvmConfig::new(chain_id, crate::BURN_GAS_PRICE.into());
+        let mut executor = Executor::testing();
+        executor.config = evm_config;
 
         let alice = Persona::new();
         let mut create_tx = alice.unsigned(TransactionAction::Call(H160::zero()), &[]);
@@ -1057,11 +1014,11 @@ mod tests {
                     address,
                     create_tx.clone(),
                     true,
-                    false, /*allow zero */
                     OwnedPrecompile::default()
                 )
                 .unwrap_err(),
             Error::GasPriceOutOfBounds {
+                min_gas_price: executor.config.burn_gas_price,
                 gas_price: 0.into()
             }
         );
@@ -1070,13 +1027,7 @@ mod tests {
 
         assert_eq!(
             executor
-                .transaction_execute_unsinged(
-                    address,
-                    create_tx,
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default()
-                )
+                .transaction_execute_unsinged(address, create_tx, true, OwnedPrecompile::default())
                 .unwrap()
                 .exit_reason,
             ExitReason::Succeed(ExitSucceed::Stopped)
@@ -1094,12 +1045,8 @@ mod tests {
             chain_id,
             ..EvmConfig::default()
         };
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            evm_config,
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
+        executor.config = evm_config;
 
         let code = hex::decode(METACOIN_CODE).unwrap();
 
@@ -1113,7 +1060,6 @@ mod tests {
                     address,
                     create_tx.clone(),
                     true,
-                    false, /*allow zero */
                     OwnedPrecompile::default()
                 )
                 .unwrap()
@@ -1133,13 +1079,7 @@ mod tests {
 
         assert_eq!(
             executor
-                .transaction_execute_unsinged(
-                    address,
-                    create_tx,
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default()
-                )
+                .transaction_execute_unsinged(address, create_tx, true, OwnedPrecompile::default())
                 .unwrap_err(),
             Error::DuplicateTx { tx_hash: hash }
         );
@@ -1157,12 +1097,8 @@ mod tests {
             chain_id,
             ..EvmConfig::default()
         };
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            evm_config,
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
+        executor.config = evm_config;
 
         let code = hex::decode(METACOIN_CODE).unwrap();
 
@@ -1172,7 +1108,7 @@ mod tests {
         let wrong_tx = create_tx.clone().sign(&alice.secret, None);
         assert!(matches!(
             dbg!(executor
-                .transaction_execute(wrong_tx, true,false/*allow zero */, OwnedPrecompile::default())
+                .transaction_execute(wrong_tx, true, OwnedPrecompile::default())
                 .unwrap_err()),
             Error::WrongChainId {
                 chain_id: err_chain_id,
@@ -1185,7 +1121,7 @@ mod tests {
             .sign(&alice.secret, Some(another_chain_id));
         assert!(matches!(
             executor
-                .transaction_execute(wrong_tx, true,false/*allow zero */, OwnedPrecompile::default())
+                .transaction_execute(wrong_tx, true, OwnedPrecompile::default())
                 .unwrap_err(),
             Error::WrongChainId {
                 chain_id: err_chain_id,
@@ -1196,12 +1132,7 @@ mod tests {
         let create_tx = create_tx.sign(&alice.secret, Some(chain_id));
         assert!(matches!(
             executor
-                .transaction_execute(
-                    create_tx,
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default()
-                )
+                .transaction_execute(create_tx, true, OwnedPrecompile::default())
                 .unwrap()
                 .exit_reason,
             ExitReason::Succeed(ExitSucceed::Returned)
@@ -1218,12 +1149,7 @@ mod tests {
 
         let code = hex::decode(METACOIN_CODE).unwrap();
 
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            Default::default(),
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
 
         let mut alice = Persona::new();
         let create_tx = alice.create(&code);
@@ -1231,12 +1157,7 @@ mod tests {
 
         assert!(matches!(
             executor
-                .transaction_execute(
-                    create_tx,
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default()
-                )
+                .transaction_execute(create_tx, true, OwnedPrecompile::default())
                 .unwrap()
                 .exit_reason,
             ExitReason::Succeed(ExitSucceed::Returned)
@@ -1256,12 +1177,7 @@ mod tests {
             exit_data: bytes,
             ..
         } = executor
-            .transaction_execute(
-                call_tx,
-                true,
-                false, /*allow zero */
-                OwnedPrecompile::default(),
-            )
+            .transaction_execute(call_tx, true, OwnedPrecompile::default())
             .unwrap();
 
         assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
@@ -1291,12 +1207,7 @@ mod tests {
             exit_data: bytes,
             ..
         } = executor
-            .transaction_execute(
-                send_tx,
-                true,
-                false, /*allow zero */
-                OwnedPrecompile::default(),
-            )
+            .transaction_execute(send_tx, true, OwnedPrecompile::default())
             .unwrap();
         assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
         assert_eq!(
@@ -1320,12 +1231,7 @@ mod tests {
             exit_data: bytes,
             ..
         } = executor
-            .transaction_execute(
-                call_tx,
-                true,
-                false, /*allow zero */
-                OwnedPrecompile::default(),
-            )
+            .transaction_execute(call_tx, true, OwnedPrecompile::default())
             .unwrap();
         assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
         assert_eq!(
@@ -1349,12 +1255,7 @@ mod tests {
             exit_data: bytes,
             ..
         } = executor
-            .transaction_execute(
-                call_tx,
-                true,
-                false, /*allow zero */
-                OwnedPrecompile::default(),
-            )
+            .transaction_execute(call_tx, true, OwnedPrecompile::default())
             .unwrap();
         assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
         assert_eq!(
@@ -1373,12 +1274,8 @@ mod tests {
             let mut bob = bob.clone();
 
             let state = committed.next_incomming(0);
-            let mut executor = Executor::with_config(
-                state,
-                Default::default(),
-                Default::default(),
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = state;
 
             let send_tx = bob.call(
                 contract,
@@ -1395,12 +1292,7 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(
-                    send_tx,
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default(),
-                )
+                .transaction_execute(send_tx, true, OwnedPrecompile::default())
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1424,12 +1316,7 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(
-                    call_tx,
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default(),
-                )
+                .transaction_execute(call_tx, true, OwnedPrecompile::default())
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1453,12 +1340,7 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(
-                    call_tx,
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default(),
-                )
+                .transaction_execute(call_tx, true, OwnedPrecompile::default())
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1471,12 +1353,8 @@ mod tests {
         {
             // NOTE: ensure blockss are different
             let state = committed.next_incomming(0);
-            let mut executor = Executor::with_config(
-                state,
-                Default::default(),
-                Default::default(),
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = state;
 
             let send_tx = alice.call(
                 contract,
@@ -1493,12 +1371,7 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(
-                    send_tx,
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default(),
-                )
+                .transaction_execute(send_tx, true, OwnedPrecompile::default())
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1522,12 +1395,7 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(
-                    call_tx,
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default(),
-                )
+                .transaction_execute(call_tx, true, OwnedPrecompile::default())
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1551,12 +1419,7 @@ mod tests {
                 exit_data: bytes,
                 ..
             } = executor
-                .transaction_execute(
-                    call_tx,
-                    true,
-                    false, /*allow zero */
-                    OwnedPrecompile::default(),
-                )
+                .transaction_execute(call_tx, true, OwnedPrecompile::default())
                 .unwrap();
             assert_eq!(exit_reason, ExitReason::Succeed(ExitSucceed::Returned));
             assert_eq!(
@@ -1575,12 +1438,8 @@ mod tests {
         let code = hex::decode(HELLO_WORLD_CODE).unwrap();
         let data = hex::decode(HELLO_WORLD_ABI).unwrap();
 
-        let mut executor = Executor::with_config(
-            EvmBackend::default(),
-            Default::default(),
-            Default::default(),
-            FeatureSet::new(false, true, false),
-        );
+        let mut executor = Executor::testing();
+        executor.feature_set = FeatureSet::new(false, true, false);
 
         let exit_reason = match executor.with_executor(OwnedPrecompile::default(), |e| {
             e.create(
@@ -1612,7 +1471,6 @@ mod tests {
                     input: data.to_vec(),
                 },
                 true,
-                false, /*allow zero */
                 OwnedPrecompile::default(),
             )
             .unwrap();

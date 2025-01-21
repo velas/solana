@@ -4,7 +4,7 @@ use {
     evm_state::{Address, MemoryAccount, Transaction, UnsignedTransaction, H256, U256},
     serde::{Deserialize, Serialize},
     solana_program_runtime::evm_executor_context::ChainID,
-    std::collections::BTreeMap,
+    std::collections::{BTreeMap, BTreeSet},
 };
 
 pub mod v0;
@@ -250,18 +250,22 @@ impl From<AllocAccount> for MemoryAccount {
     Deserialize,
 )]
 pub struct SubchainConfig {
+    pub alloc: BTreeMap<evm::Address, AllocAccount>,
+    pub whitelisted: BTreeSet<solana::Address>,
     pub hardfork: Hardfork,
     pub network_name: String,
     pub token_name: String,
-    pub alloc: BTreeMap<Address, AllocAccount>,
+    pub min_gas_price: U256,
 }
 impl Default for SubchainConfig {
     fn default() -> Self {
         Self {
+            alloc: BTreeMap::new(),
+            whitelisted: BTreeSet::new(),
             hardfork: Hardfork::Istanbul,
             network_name: String::new(),
             token_name: String::new(),
-            alloc: BTreeMap::new(),
+            min_gas_price: U256::zero(),
         }
     }
 }

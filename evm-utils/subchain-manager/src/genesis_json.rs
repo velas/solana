@@ -3,7 +3,13 @@ use {
     evm_rpc::Bytes,
     evm_state::{H160, H256, U256},
     serde::{Deserialize, Serialize},
-    std::{collections::BTreeMap, fmt::Display, str::FromStr, u64},
+    solana_sdk::pubkey::Pubkey,
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        fmt::Display,
+        str::FromStr,
+        u64,
+    },
 };
 #[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
@@ -68,6 +74,12 @@ pub struct ChainConfig {
 
     #[serde(default)]
     pub token_name: String,
+
+    #[serde(default)]
+    pub gas_price: U256, // TODO: min_gas_price?
+
+    #[serde(default)]
+    pub whitelisted: BTreeSet<Pubkey>,
     // Subchain administrator is only abble to configure evm-runtime.
     // Most of consensus fields irrelevant to evm bytecode implementation.
     // So commented out.
@@ -224,6 +236,8 @@ mod tests {
                 start_hardfork: Hardfork::Istanbul,
                 network_name: "testnet".to_string(),
                 token_name: "test".to_string(),
+                whitelisted: [Pubkey::new_from_array([15; 32])].into(),
+                gas_price: 15.into(),
             },
             auxiliary: OptionalConfig {
                 token_symbol: "".to_string(),
@@ -238,10 +252,11 @@ mod tests {
                 "startHardfork": "Istanbul",
                 "networkName": "testnet",
                 "tokenName": "test",
-
+                "gasPrice": "0xf",
+                "whitelisted": [[15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]],
             },
             "alloc": {},
-            "auxiliary": {}
+            "auxiliary": {},
         });
 
         assert_eq!(serde_json::to_value(&genesis_config).unwrap(), json);
@@ -306,6 +321,8 @@ mod tests {
                 start_hardfork: Hardfork::Istanbul,
                 network_name: "".to_string(),
                 token_name: "".to_string(),
+                gas_price: 15.into(),
+                whitelisted: [].into()
             },
             alloc: GenesisAlloc(
                 vec![
@@ -345,7 +362,9 @@ mod tests {
                 "chainId": "0x1",
                 "startHardfork": "Istanbul",
                 "networkName": "",
-                "tokenName": ""
+                "tokenName": "",
+                "whitelisted": [[15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15]],
+                "gasPrice": "0xf"
             },
             "alloc": {
                 "0x2222222222222222222222222222222222222222": {

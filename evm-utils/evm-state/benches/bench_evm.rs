@@ -1,10 +1,7 @@
 use {
     criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput},
     evm::{ExitReason, ExitSucceed},
-    evm_state::{
-        executor::{FeatureSet, OwnedPrecompile},
-        *,
-    },
+    evm_state::{executor::OwnedPrecompile, *},
     primitive_types::{H160 as Address, H256, U256},
     sha3::{Digest, Keccak256},
     std::{collections::HashSet, iter, time::Instant},
@@ -46,12 +43,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             state.set_account_state(address, AccountState::default());
         }
 
-        let mut executor = Executor::with_config(
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
 
         let exit_reason: (ExitReason, Vec<u8>) =
             executor.with_executor(OwnedPrecompile::default(), |executor| {
@@ -99,12 +91,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             state.set_account_state(address, AccountState::default());
         }
 
-        let mut executor = Executor::with_config(
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
 
         let exit_reason = executor.with_executor(OwnedPrecompile::default(), |executor| {
             executor.transact_create(contract, U256::zero(), code.clone(), u64::MAX, vec![])
@@ -122,12 +109,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
         let mut idx = 0;
         b.iter(|| {
-            let mut executor = Executor::with_config(
-                updated_state.clone(),
-                Default::default(),
-                Default::default(),
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
 
             let exit_reason = black_box(executor.with_executor(
                 OwnedPrecompile::default(),
@@ -154,12 +136,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     group.bench_function("call_hello_with_executor_recreate_raw", |b| {
-        let mut executor = Executor::with_config(
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
 
         let exit_reason = executor.with_executor(OwnedPrecompile::default(), |executor| {
             executor.transact_create(contract, U256::zero(), code.clone(), u64::MAX, vec![])
@@ -187,12 +164,8 @@ fn criterion_benchmark(c: &mut Criterion) {
             input: data.to_vec(),
         };
         b.iter(|| {
-            let mut executor = Executor::with_config(
-                updated_state.clone(),
-                Default::default(),
-                Default::default(),
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = updated_state.clone();
 
             let ExecutionResult {
                 exit_reason,
@@ -215,12 +188,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     group.bench_function("call_hello_with_executor_recreate_and_commit", |b| {
-        let mut executor = Executor::with_config(
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
 
         let exit_reason = executor.with_executor(OwnedPrecompile::default(), |executor| {
             executor.transact_create(contract, U256::zero(), code.clone(), u64::MAX, vec![])
@@ -241,12 +209,8 @@ fn criterion_benchmark(c: &mut Criterion) {
 
         let mut slot = 0;
         b.iter(|| {
-            let mut executor = Executor::with_config(
-                updated_state.clone(),
-                Default::default(),
-                Default::default(),
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = updated_state.clone();
 
             let tx = UnsignedTransaction {
                 nonce: slot.into(),
@@ -288,12 +252,8 @@ fn criterion_benchmark(c: &mut Criterion) {
                 Incomming::default(),
                 Storage::create_temporary_gc().unwrap(),
             );
-            let mut executor = Executor::with_config(
-                backend,
-                Default::default(),
-                Default::default(),
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = backend;
 
             let exit_reason = executor.with_executor(OwnedPrecompile::default(), |executor| {
                 executor.transact_create(contract, U256::zero(), code.clone(), u64::MAX, vec![])
@@ -314,12 +274,8 @@ fn criterion_benchmark(c: &mut Criterion) {
 
             let mut slot = 0;
             b.iter(|| {
-                let mut executor = Executor::with_config(
-                    updated_state.clone(),
-                    Default::default(),
-                    Default::default(),
-                    FeatureSet::new_with_all_enabled(),
-                );
+                let mut executor = Executor::testing();
+                executor.evm_backend = updated_state.clone();
 
                 let tx = UnsignedTransaction {
                     nonce: slot.into(),
@@ -390,12 +346,8 @@ fn criterion_benchmark(c: &mut Criterion) {
                 Incomming::default(),
                 Storage::create_temporary_gc().unwrap(),
             );
-            let mut executor = Executor::with_config(
-                backend,
-                Default::default(),
-                Default::default(),
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = backend;
 
             let exit_reason = executor.with_executor(OwnedPrecompile::default(), |executor| {
                 executor.transact_create(contract, U256::zero(), code.clone(), u64::MAX, vec![])
@@ -416,12 +368,8 @@ fn criterion_benchmark(c: &mut Criterion) {
 
             let mut slot = 0;
             b.iter(|| {
-                let mut executor = Executor::with_config(
-                    updated_state.clone(),
-                    Default::default(),
-                    Default::default(),
-                    FeatureSet::new_with_all_enabled(),
-                );
+                let mut executor = Executor::testing();
+                executor.evm_backend = updated_state.clone();
 
                 let tx = UnsignedTransaction {
                     nonce: slot.into(),
@@ -465,12 +413,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     );
 
     group.bench_function("call_hello_with_signature_verify_single_key", |b| {
-        let mut executor = Executor::with_config(
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
 
         let exit_reason = executor.with_executor(OwnedPrecompile::default(), |executor| {
             executor.transact_create(contract, U256::zero(), code.clone(), u64::MAX, vec![])
@@ -500,12 +443,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         .sign(&user_key, Some(evm_state::TEST_CHAIN_ID));
 
         b.iter(|| {
-            let mut executor = Executor::with_config(
-                updated_state.clone(),
-                Default::default(),
-                Default::default(),
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = updated_state.clone();
 
             let ExecutionResult {
                 exit_reason,
@@ -537,12 +476,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     state.set_account_state(address, AccountState::default());
                 }
 
-                let mut executor = Executor::with_config(
-                    Default::default(),
-                    Default::default(),
-                    Default::default(),
-                    FeatureSet::new_with_all_enabled(),
-                );
+                let mut executor = Executor::testing();
                 let create_transaction_result = executor.with_executor(OwnedPrecompile::default(),|executor| {
                     executor.transact_create(contract, U256::zero(), code.clone(), u64::MAX, vec![])
                 });
@@ -568,12 +502,8 @@ fn criterion_benchmark(c: &mut Criterion) {
                 let expected_result = &expected_result;
 
                 b.iter_custom(move |iters| {
-                    let mut executor = Executor::with_config(
-                        state.clone(),
-                        Default::default(),
-                        Default::default(),
-                        FeatureSet::new_with_all_enabled(),
-                    );
+                    let mut executor = Executor::testing();
+                    executor.evm_backend = state.clone();
 
                     let start = Instant::now();
 
@@ -615,12 +545,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         let committed = state.commit_block(0, Default::default());
 
         let  state = committed.next_incomming(0);
-        let mut executor = Executor::with_config(
-            state,
-            Default::default(),
-            Default::default(),
-            FeatureSet::new_with_all_enabled(),
-        );
+        let mut executor = Executor::testing();
+        executor.evm_backend = state;
 
         let exit_reason = executor.with_executor(OwnedPrecompile::default(),|executor| {
             executor.transact_create(contract, U256::zero(), code.clone(), u64::MAX, vec![])
@@ -636,12 +562,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         let contract_address = TransactionAction::Create.address(contract, U256::zero());
         let mut idx = 0;
         b.iter(|| {
-            let mut executor = Executor::with_config(
-                state.clone(),
-                Default::default(),
-                Default::default(),
-                FeatureSet::new_with_all_enabled(),
-            );
+            let mut executor = Executor::testing();
+            executor.evm_backend = state.clone();
 
             let exit_reason = executor.with_executor(OwnedPrecompile::default(),|executor| {
                 executor.transact_call(

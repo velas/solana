@@ -20,6 +20,7 @@ use {
 pub const DEFAULT_GAS_LIMIT: u64 = 300_000_000;
 
 pub const BURN_GAS_PRICE: u64 = 2_000_000_000; // 2 lamports per gas (in wei).
+pub const BURN_GAS_PRICE_IN_SUBCHAIN: u64 = 40_000_000_000; // 40 lamports per gas (in wei).
 /// Dont load to many account to memory, to avoid OOM.
 pub const MAX_IN_MEMORY_EVM_ACCOUNTS: usize = 10000;
 /// Approximate size, real size could be twice as much

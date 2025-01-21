@@ -61,6 +61,8 @@ impl genesis_json::GenesisConfig {
                 }
             },
             alloc,
+            whitelisted: self.config.whitelisted.clone(),
+            min_gas_price: self.config.gas_price,
         };
         let owner = keypair.pubkey();
         let ix = solana_evm_loader_program::create_evm_subchain_account(owner, chain_id, config);

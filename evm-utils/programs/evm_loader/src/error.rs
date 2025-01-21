@@ -85,6 +85,9 @@ pub enum EvmError {
 
     #[snafu(display("Invalid subchain config."))]
     InvalidSubchainConfig,
+
+    #[snafu(display("EVM Subchain Execution is forbidden for Native Sender."))]
+    EVMSubchainExecutionForbidden,
 }
 
 impl<E> DecodeError<E> for EvmError {

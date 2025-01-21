@@ -1,7 +1,7 @@
 use {
     color_eyre::eyre::WrapErr,
     evm_rpc::{Bytes, FormatHex},
-    evm_state::U256,
+    evm_state::{BURN_GAS_PRICE_IN_SUBCHAIN, U256},
     genesis_json::ChainID,
     inquire::{validator::Validation, Select},
     interactive_clap::{ResultFromCli, ToCliArgs},
@@ -557,6 +557,8 @@ impl From<Config> for genesis_json::GenesisConfig {
                 token_name: config.token_name,
                 chain_id: config.chain_id.into(),
                 start_hardfork: config.hardfork,
+                gas_price: U256::from(BURN_GAS_PRICE_IN_SUBCHAIN),
+                whitelisted: [].into(),
             },
             alloc: genesis_json::GenesisAlloc(alloc),
             auxiliary: genesis_json::OptionalConfig {

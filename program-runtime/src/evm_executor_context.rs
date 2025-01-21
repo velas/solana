@@ -432,18 +432,30 @@ pub enum ChainParam {
     GetSubchain {
         chain_id: ChainID,
         subchain_hashes: SubchainHashes,
+        gas_price: U256,
     },
 }
 impl ChainParam {
     pub fn is_main(&self) -> bool {
         matches!(self, ChainParam::GetMainChain)
     }
+
     // Return None if main chain
     pub fn chain_id(&self) -> Chain {
         match self {
             ChainParam::GetMainChain => None,
             ChainParam::CreateSubchain { chain_id } => Some(*chain_id),
             ChainParam::GetSubchain { chain_id, .. } => Some(*chain_id),
+        }
+    }
+
+    pub fn min_gas_price(&self, is_evm_burn_fee_activated: bool) -> U256 {
+        if !is_evm_burn_fee_activated {
+            return 0.into(); // pre beta velas behaviour
+        }
+        match self {
+            ChainParam::GetSubchain { gas_price, .. } => *gas_price,
+            _ => BURN_GAS_PRICE.into(),
         }
     }
 }
@@ -518,7 +530,7 @@ impl EvmExecutorContext {
                     params
                         .chain_id()
                         .unwrap_or_else(|| self.evm.main_chain().id()),
-                    self.is_evm_burn_fee_activated,
+                    params.min_gas_price(self.is_evm_burn_fee_activated),
                 ),
                 self.feature_set,
             );
@@ -534,6 +546,7 @@ impl EvmExecutorContext {
         }
     }
 
+    // TODO: move params by value?
     fn get_last_hashes(&self, params: &ChainParam) -> [evm_state::H256; MAX_EVM_BLOCKHASHES] {
         match params {
             ChainParam::CreateSubchain { chain_id: _ } => {
@@ -541,6 +554,7 @@ impl EvmExecutorContext {
             }
             ChainParam::GetSubchain {
                 chain_id: _,
+                gas_price: _,
                 subchain_hashes,
             } => (subchain_hashes.deref()).clone(),
             ChainParam::GetMainChain => self.evm.main_chain().blockhashes().get_hashes().clone(),

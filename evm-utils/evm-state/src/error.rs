@@ -92,12 +92,16 @@ pub enum Error {
 
     #[snafu(display("Gas used={} exceed gas_limit={}", used_gas, gas_limit,))]
     GasUsedOutOfBounds { used_gas: U256, gas_limit: U256 },
+
     #[snafu(display(
-        "Gas price should not exceed U64::MAX, and be more than BURN_GAS_PRICE({}), provided_gas_price={}",
-        crate::BURN_GAS_PRICE,
+        "Gas price should not exceed U64::MAX, and be more than minimum gas price set to {}, provided_gas_price={}",
+        min_gas_price,
         gas_price,
     ))]
-    GasPriceOutOfBounds { gas_price: U256 },
+    GasPriceOutOfBounds {
+        min_gas_price: U256,
+        gas_price: U256,
+    },
 
     #[snafu(display("Transaction with this hash already executed, tx_hash={:?}", tx_hash,))]
     DuplicateTx { tx_hash: H256 },

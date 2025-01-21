@@ -142,13 +142,9 @@ pub fn parse_account_data(
         ParsableAccount::Vote => serde_json::to_value(parse_vote(data)?)?,
         ParsableAccount::EvmState => {
             let val = solana_evm_loader_program::subchain::SubchainState::try_from_slice(data)
-                .map_err(|e| {
-                    println!("Parse error: {:?}", e);
-                    ParseAccountError::AccountNotParsable(ParsableAccount::EvmState)
-                })?;
+                .map_err(|_e| ParseAccountError::AccountNotParsable(ParsableAccount::EvmState))?;
             let expected_addr = solana_evm_loader_program::evm_state_subchain_account(val.chain_id);
             if pubkey != &expected_addr {
-                println!("Parse 111");
                 return Err(ParseAccountError::AccountNotParsable(
                     ParsableAccount::EvmState,
                 ));
@@ -175,6 +171,7 @@ mod test {
     use {
         super::*,
         crate::parse_account_data,
+        serde_json::json,
         solana_evm_loader_program::{
             instructions::{Hardfork, SubchainConfig},
             subchain::SubchainState,
@@ -224,44 +221,48 @@ mod test {
         assert_eq!(parsed.space, State::size() as u64);
         let evm_state_subchain = SubchainState::new(
             SubchainConfig {
+                alloc: Default::default(),
+                hardfork: Hardfork::Istanbul,
                 token_name: "token_name".to_string(),
                 network_name: "network_name".to_string(),
-                hardfork: Hardfork::Istanbul,
-                alloc: Default::default(),
+                whitelisted: [Pubkey::new_from_array([15; 32])].into(),
+                min_gas_price: 15.into(),
             },
             account_pubkey,
             1,
         );
         let data = ::borsh::BorshSerialize::try_to_vec(&evm_state_subchain).unwrap();
-        let parsed = parse_account_data(
+        let account = parse_account_data(
             &solana_evm_loader_program::evm_state_subchain_account(1),
             &evm_state::id(),
             &data,
             None,
         )
         .unwrap();
-        assert_eq!(parsed.program, "evm-state".to_string());
-        assert_eq!(
-            parsed
-                .parsed
-                .as_object()
-                .unwrap()
-                .get("chain_id")
-                .unwrap()
-                .as_u64()
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            parsed
-                .parsed
-                .as_object()
-                .unwrap()
-                .get("network_name")
-                .unwrap()
-                .as_str()
-                .unwrap(),
-            "network_name"
+
+        assert_eq!(account.program, "evm-state".to_string());
+
+        let parsed = account.parsed.as_object().unwrap();
+
+        let assert_field = |name: &str, value: Value| {
+            assert_eq!(
+                parsed
+                    .get(name)
+                    .expect(&format!("field `{name}` not found")),
+                &value
+            );
+        };
+
+        assert_field("token_name", json!("token_name"));
+        assert_field("chain_id", json!(1));
+        assert_field("network_name", json!("network_name"));
+        assert_field("min_gas_price", json!("0xf"));
+        assert_field(
+            "whitelisted",
+            json!([[
+                15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+                15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15
+            ]]),
         );
     }
 }
